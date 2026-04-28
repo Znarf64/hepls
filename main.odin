@@ -1,6 +1,8 @@
 #+feature dynamic-literals
 package hepls
 
+import "base:intrinsics"
+
 import "core:bufio"
 import "core:fmt"
 import "core:io"
@@ -9,14 +11,20 @@ import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:encoding/json"
+import vmem "core:mem/virtual"
+
+import hep "hephaistos"
 
 Error :: union {
 	json.Unmarshal_Error,
 	json.Marshal_Error,
 }
 
-state: struct {
+State :: struct {
 	initialized: bool,
+	shutdown:    bool,
+	ast:         []^hep.Ast_Stmt,
+	ast_arena:   vmem.Arena,
 }
 
 main :: proc() {
@@ -27,6 +35,11 @@ main :: proc() {
 	context.logger = log.create_file_logger(log_file, lowest = .Info)
 
 	// TODO(Franz): (init doc-format)
+
+	state: State
+	arena_err := vmem.arena_init_growing(&state.ast_arena)
+	log.assert(arena_err == nil)
+	defer vmem.arena_destroy(&state.ast_arena)
 
 	s: bufio.Scanner
 	bufio.scanner_init(&s, io.to_reader(os.to_stream(os.stdin)))
@@ -39,16 +52,16 @@ main :: proc() {
 			log.error("Failed to decode message")
 			return
 		}
-		handle_message(method, contents)
+		handle_message(&state, method, contents)
 
 		free_all(context.temp_allocator)
 	}
 }
 
-handle_message :: proc(method: string, contents: []byte) {
+handle_message :: proc(state: ^State, method: string, contents: []byte) {
 	log.info(method)
 	if fn, ok := requests_map[method]; ok {
-		err := fn(contents)
+		err := fn(state, contents)
 		if err != nil {
 			log.panic(method, err, string(contents))
 		}
@@ -61,7 +74,7 @@ handle_message :: proc(method: string, contents: []byte) {
 send_buffer: strings.Builder
 
 @(require_results)
-send_message :: proc(data: $T) -> (error: Error) {
+send_message :: proc(data: $T) -> (error: Error) where intrinsics.type_has_field(T, "jsonrpc") {
 	data        := data
 	data.jsonrpc = "2.0"
 
@@ -107,43 +120,40 @@ split :: proc(data: []byte, _: bool) -> (
 	return
 }
 
-requests_map := map[string]proc(contents: []byte) -> (error: Error) {
+requests_map := map[string]proc(state: ^State, contents: []byte) -> (error: Error) {
 	"textDocument/didOpen"    = notification_did_open_text_document,
 	"textDocument/didChange"  = notification_did_change_text_document,
 	"textDocument/didSave"    = notification_did_save_text_document,
-	// "textDocument/completion" = request_completion,
-	"shutdown"                = notification_shutdown,
+	"textDocument/completion" = request_completion,
+	"textDocument/hover"      = request_hover,
+	"shutdown"                = request_shutdown,
 	"initialize"              = request_initialize,
 	"initialized"             = notification_initialized,
-	"exit"                    = request_exit,
+	"exit"                    = notification_exit,
 }
 
-@(require_results)
-notification_initialized :: proc(contents: []byte) -> Error {
+notification_initialized :: proc(state: ^State, contents: []byte) -> Error {
 	return nil
 }
 
-@(require_results)
-notification_did_open_text_document :: proc(contents: []byte) -> (error: Error) {
+notification_did_open_text_document :: proc(state: ^State, contents: []byte) -> (error: Error) {
 	notification: Notification(Did_Open_Text_Document_Params)
 	json.unmarshal(contents, &notification) or_return
 	params := notification.params
 
-	return check_file(notification.params.textDocument.text, params.textDocument.uri)
+	return check_file(state, notification.params.textDocument.text, params.textDocument.uri)
 }
 
-@(require_results)
-notification_did_change_text_document :: proc(content: []byte) -> (error: Error) {
+notification_did_change_text_document :: proc(state: ^State, content: []byte) -> (error: Error) {
 	notification: Notification(Did_Change_Text_Document_Params)
 	json.unmarshal(content, &notification) or_return
 	params := notification.params
 
-	return check_file(params.contentChanges[0].text, params.textDocument.uri)
+	return check_file(state, params.contentChanges[0].text, params.textDocument.uri)
 }
 
-@(require_results)
-notification_did_save_text_document :: proc(content: []byte) -> (error: Error) {
-	notification: Notification(Did_Save_Text_Document_Params)
+notification_did_save_text_document :: proc(state: ^State, content: []byte) -> (error: Error) {
+	notification: Request(Did_Save_Text_Document_Params)
 	json.unmarshal(content, &notification) or_return
 	params := notification.params
 
@@ -152,12 +162,26 @@ notification_did_save_text_document :: proc(content: []byte) -> (error: Error) {
 		return nil
 	}
 
-	return check_file(text, notification.params.textDocument.uri)
+	return check_file(state, text, notification.params.textDocument.uri)
 }
 
-notification_shutdown :: proc(_: []byte) -> (error: Error) {
-	send_message(Base_Notification{ method = "shutdown", }) or_return
-	os.exit(0)
+request_shutdown :: proc(state: ^State, content: []byte) -> (error: Error) {
+	request: Request(struct{})
+	json.unmarshal(content, &request) or_return
+
+	state.shutdown = true
+
+	response := Response {
+		id = request.id,
+	}
+	return send_message(response)
+}
+
+notification_exit :: proc(state: ^State, content: []byte) -> (error: Error) {
+	notification: Notification(struct{})
+	json.unmarshal(content, &notification) or_return
+
+	os.exit(state.shutdown ? 0 : 1)
 }
 
 Notification :: struct($Params: typeid) {
@@ -242,12 +266,14 @@ Request :: struct($Params: typeid) {
 }
 
 @(require_results)
-request_initialize :: proc(contents: []byte) -> (error: Error) {
+request_initialize :: proc(state: ^State, contents: []byte) -> (error: Error) {
 	request: Request(Initialize_Request_Params)
 	json.unmarshal(contents, &request) or_return
 	params := request.params
 
 	log.info("Connected to", params.clientInfo.name, params.clientInfo.version)
+
+	state.initialized = true
 
 	response := Response {
 		id     = request.id,
@@ -256,14 +282,13 @@ request_initialize :: proc(contents: []byte) -> (error: Error) {
 				name    = "hephaistos lsp",
 				version = "0.0.1",
 			},
-			capabilities = { textDocumentSync = .Full, },
+			capabilities = {
+				textDocumentSync = .Full,
+				hoverProvider    = true,
+			},
 		},
 	}
 	return send_message(response)
-}
-
-request_exit :: proc(_: []byte) -> (error: Error) {
-	os.exit(0)
 }
 
 Initialize_Request_Params :: struct {
@@ -281,6 +306,7 @@ Initialize_Result :: struct {
 Capabilities :: struct {
 	textDocumentSync:   Text_Document_Sync_Kind,
 	completionProvider: Completion_Options,
+	hoverProvider:      bool,
 }
 
 Completion_Options :: struct {}
@@ -304,6 +330,7 @@ Response :: struct {
 Response_Result :: union {
 	Initialize_Result,
 	Completion_Result,
+	Hover_Result,
 }
 
 Base_Response :: struct {
@@ -317,63 +344,95 @@ Completion_Item :: struct {
 	label: string,
 }
 
-import hep "hephaistos"
+Completion_Trigger_Kind :: enum {
+	/**
+	 * Completion was triggered by typing an identifier (24x7 code
+	 * complete), manual invocation (e.g Ctrl+Space) or via API.
+	 */
+	Invoked = 1,
 
-@(require_results)
-check_file :: proc(source: string, uri: Uri) -> (error: Error) {
-	errors := check_file_internal(source, context.temp_allocator)
+	/**
+	 * Completion was triggered by a trigger character specified by
+	 * the `triggerCharacters` properties of the
+	 * `CompletionRegistrationOptions`.
+	 */
+	TriggerCharacter = 2,
 
-	diagnostics := make([]Diagnostic, len(errors), context.temp_allocator)
-	for &diagnostic, i in diagnostics {
-		error := errors[i]
-
-		diagnostic = {
-			range    = {
-				start = { line = error.line - 1,     character = error.column - 1,     },
-				end   = { line = error.end.line - 1, character = error.end.column - 1, },
-			},
-			message  = error.message,
-			severity = .Error,
-		}
-	}
-
-	response_notification := Notification(Publish_Diagnositics_Params) {
-		method = "textDocument/publishDiagnostics",
-		params = {
-			uri         = uri,
-			diagnostics = diagnostics,
-		},
-	}
-	return send_message(response_notification)
+	/**
+	 * Completion was re-triggered as the current completion list is incomplete.
+	 */
+	TriggerForIncompleteCompletions = 3,
 }
 
-@(require_results)
-check_file_internal :: proc(source: string, allocator := context.allocator) -> (errors: []hep.Error) {
-	tokens: []hep.Token
-	tokens, errors = hep.tokenize(source, false, allocator = context.temp_allocator, error_allocator = allocator)
-	if len(errors) != 0 {
-		return
-	}
+Completion_Params :: struct {
+	context_: struct {
+		triggerKind: Completion_Trigger_Kind,
+	} `json:"context"`,
+	triggerCharacter: Maybe(string),
+}
 
-	stmts: []^hep.Ast_Stmt
-	stmts, errors = hep.parse(tokens, allocator = context.temp_allocator, error_allocator = allocator)
-	if len(errors) != 0 {
-		return
-	}
+request_completion :: proc(state: ^State, content: []byte) -> Error {
+	request: Request(Completion_Params)
+	json.unmarshal(content, &request) or_return
+	params := request.params
 
-	checker: hep.Checker
-	checker, errors = hep.check(
-		stmts,
-		defines         = {},
-		types           = {},
-		libraries       = {},
-		flags           = {},
-		allocator       = context.temp_allocator,
-		error_allocator = allocator,
-	)
-	if len(errors) != 0 {
-		return
+	response := Response {
+		id     = request.id,
+		result = Completion_Result {
+			{ "return",  },
+			{ "import",  },
+			{ "for",     },
+			{ "in",      },
+			{ "proc",    },
+			{ "struct",  },
+			{ "enum",    },
+			{ "bit_set", },
+			{ "cast",    },
+		},
 	}
+	return send_message(response)
+}
 
-	return
+Text_Document_Position_Params :: struct {
+	textDocument: Text_Document_Identifier,
+	position:     Position,
+}
+
+Hover_Params :: struct {
+	using _: Text_Document_Position_Params,
+}
+
+MarkupKind :: distinct string
+
+MarkupContent :: struct {
+	kind:  MarkupKind,
+	value: string,
+}
+
+Hover_Result :: struct {
+	contents: MarkupContent,
+	range:    Maybe(Range),
+}
+
+request_hover :: proc(state: ^State, content: []byte) -> Error {
+	request: Request(Hover_Params)
+	json.unmarshal(content, &request) or_return
+	params := request.params
+
+	position           := params.position
+	position.line      += 1
+	position.character += 1
+
+	node := hovered_node_in_block(state.ast, position)
+
+	response := Response {
+		id     = request.id,
+		result = Hover_Result {
+			contents = {
+				kind  = "plaintext",
+				value = fmt.tprint(node),
+			},
+		},
+	}
+	return send_message(response)
 }

@@ -1,10 +1,7 @@
 package hepls
 
-import "core:bufio"
 import "core:bytes"
 import "core:encoding/json"
-import "core:fmt"
-import "core:io"
 import "core:strconv"
 import "core:strings"
 
@@ -12,22 +9,7 @@ Base_Message :: struct {
 	method: string,
 }
 
-encode_message :: proc(
-	data: any,
-	allocator := context.allocator,
-	location := #caller_location,
-) -> (
-	message: string,
-	error: Error,
-) {
-	content := json.marshal(data) or_return
-	return fmt.aprintf("Content-Length: %d\r\n\r\n%s", len(content), content), nil
-}
-
-decode_message :: proc(
-	data: []byte,
-	allocator := context.allocator,
-) -> (
+decode_message :: proc(data: []byte) -> (
 	method:   string,
 	contents: []byte,
 	ok:       bool,
@@ -50,7 +32,7 @@ decode_message :: proc(
 	contents = data[header_len + 4:]
 
 	msg: Base_Message
-	if err := json.unmarshal(contents, &msg); err != nil {
+	if err := json.unmarshal(contents, &msg, allocator = context.temp_allocator); err != nil {
 		return
 	}
 

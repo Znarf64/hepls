@@ -32,7 +32,8 @@ main :: proc() {
 	if err != 0 {
 		return
 	}
-	context.logger = log.create_file_logger(log_file, lowest = .Info)
+	context.logger = log.create_file_logger(log_file, lowest = .Info, allocator = context.allocator)
+	defer log.destroy_file_logger(context.logger, allocator = context.allocator)
 
 	// TODO(Franz): (init doc-format)
 
@@ -42,8 +43,9 @@ main :: proc() {
 	defer vmem.arena_destroy(&state.ast_arena)
 
 	s: bufio.Scanner
-	bufio.scanner_init(&s, io.to_reader(os.to_stream(os.stdin)))
+	bufio.scanner_init(&s, io.to_reader(os.to_stream(os.stdin)), buf_allocator = context.allocator)
 	s.split = split
+	defer bufio.scanner_destroy(&s)
 
 	for bufio.scanner_scan(&s) {
 		text := bufio.scanner_bytes(&s)
@@ -78,7 +80,7 @@ send_message :: proc(data: $T) -> (error: Error) where intrinsics.type_has_field
 	data        := data
 	data.jsonrpc = "2.0"
 
-	content := json.marshal(data) or_return
+	content := json.marshal(data, allocator = context.temp_allocator) or_return
 	strings.builder_reset(&send_buffer)
 	message := fmt.sbprintf(&send_buffer, "Content-Length: %d\r\n\r\n%s", len(content), content)
 
@@ -138,7 +140,7 @@ notification_initialized :: proc(state: ^State, contents: []byte) -> Error {
 
 notification_did_open_text_document :: proc(state: ^State, contents: []byte) -> (error: Error) {
 	notification: Notification(Did_Open_Text_Document_Params)
-	json.unmarshal(contents, &notification) or_return
+	json.unmarshal(contents, &notification, allocator = context.temp_allocator) or_return
 	params := notification.params
 
 	return check_file(state, notification.params.textDocument.text, params.textDocument.uri)
@@ -146,7 +148,7 @@ notification_did_open_text_document :: proc(state: ^State, contents: []byte) -> 
 
 notification_did_change_text_document :: proc(state: ^State, content: []byte) -> (error: Error) {
 	notification: Notification(Did_Change_Text_Document_Params)
-	json.unmarshal(content, &notification) or_return
+	json.unmarshal(content, &notification, allocator = context.temp_allocator) or_return
 	params := notification.params
 
 	return check_file(state, params.contentChanges[0].text, params.textDocument.uri)
@@ -154,7 +156,7 @@ notification_did_change_text_document :: proc(state: ^State, content: []byte) ->
 
 notification_did_save_text_document :: proc(state: ^State, content: []byte) -> (error: Error) {
 	notification: Request(Did_Save_Text_Document_Params)
-	json.unmarshal(content, &notification) or_return
+	json.unmarshal(content, &notification, allocator = context.temp_allocator) or_return
 	params := notification.params
 
 	text, ok := params.text.?
@@ -167,7 +169,7 @@ notification_did_save_text_document :: proc(state: ^State, content: []byte) -> (
 
 request_shutdown :: proc(state: ^State, content: []byte) -> (error: Error) {
 	request: Request(struct{})
-	json.unmarshal(content, &request) or_return
+	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
 
 	state.shutdown = true
 
@@ -179,7 +181,7 @@ request_shutdown :: proc(state: ^State, content: []byte) -> (error: Error) {
 
 notification_exit :: proc(state: ^State, content: []byte) -> (error: Error) {
 	notification: Notification(struct{})
-	json.unmarshal(content, &notification) or_return
+	json.unmarshal(content, &notification, allocator = context.temp_allocator) or_return
 
 	os.exit(state.shutdown ? 0 : 1)
 }
@@ -268,7 +270,7 @@ Request :: struct($Params: typeid) {
 @(require_results)
 request_initialize :: proc(state: ^State, contents: []byte) -> (error: Error) {
 	request: Request(Initialize_Request_Params)
-	json.unmarshal(contents, &request) or_return
+	json.unmarshal(contents, &request, allocator = context.temp_allocator) or_return
 	params := request.params
 
 	log.info("Connected to", params.clientInfo.name, params.clientInfo.version)
@@ -373,8 +375,7 @@ Completion_Params :: struct {
 
 request_completion :: proc(state: ^State, content: []byte) -> Error {
 	request: Request(Completion_Params)
-	json.unmarshal(content, &request) or_return
-	params := request.params
+	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
 
 	response := Response {
 		id     = request.id,
@@ -416,7 +417,7 @@ Hover_Result :: struct {
 
 request_hover :: proc(state: ^State, content: []byte) -> Error {
 	request: Request(Hover_Params)
-	json.unmarshal(content, &request) or_return
+	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
 	params := request.params
 
 	position           := params.position
@@ -425,14 +426,26 @@ request_hover :: proc(state: ^State, content: []byte) -> Error {
 
 	node := hovered_node_in_block(state.ast, position)
 
-	response := Response {
-		id     = request.id,
-		result = Hover_Result {
-			contents = {
-				kind  = "plaintext",
-				value = fmt.tprint(node),
-			},
+	response: Response = {
+		id = request.id,
+	}
+
+	if node == nil {
+		return send_message(response)
+	}
+
+	text := node_hover_text(node, context.temp_allocator)
+
+	if text == "" {
+		return send_message(response)
+	}
+
+	response.result = Hover_Result {
+		contents = {
+			kind  = "markdown",
+			value = text,
 		},
 	}
+
 	return send_message(response)
 }

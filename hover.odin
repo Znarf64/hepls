@@ -431,9 +431,6 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 	}
 
 	type_string: string
-	if type != nil {
-		type_string = types.to_string(type, context.temp_allocator)
-	}
 	if entity != nil {
 		#partial switch entity.kind {
 		case .Library:
@@ -447,6 +444,8 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 		case:
 			type_string = types.to_string(type, context.temp_allocator)
 		}
+	} else if type != nil {
+		type_string = types.to_string(type, context.temp_allocator)
 	}
 
 	if type_string == "" {
@@ -455,12 +454,14 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 
 	suffix: string
 	if value != nil {
-		suffix = fmt.tprintf(" (%v)", value)
-
-		if _, ok := value.(string); ok {
+		if str, ok := value.(string); ok {
 			type_string = "string"
+			suffix      = fmt.tprintf(` ("%s")`, str)
+		} else {
+			suffix = fmt.tprintf(" (%v)", value)
 		}
 	}
+
 	return fmt.aprint(
 		"```odin\n",
 		prefix,

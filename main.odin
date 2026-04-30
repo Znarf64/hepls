@@ -440,11 +440,8 @@ request_hover :: proc(state: ^State, content: []byte) -> Error {
 	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
 	params := request.params
 
-	position           := params.position
-	position.line      += 1
-	position.character += 1
-
-	node := hovered_node_in_block(state.ast, position)
+	location := position_to_location(params.position)
+	node     := hovered_node_in_block(state.ast, location)
 
 	response: Response = {
 		id = request.id,
@@ -484,11 +481,9 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
 	params := request.params
 
-	position           := params.position
-	position.line      += 1
-	position.character += 1
-
-	node := hovered_node_in_block(state.ast, position)
+	location := position_to_location(params.position)
+	node     := hovered_node_in_block(state.ast, location)
+	node      = node_definition(node)
 
 	response: Response = {
 		id = request.id,
@@ -501,17 +496,24 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 	response.result = Location {
 		uri   = params.textDocument.uri,
 		range = {
-			start = covert_position_to_lsp(node.start),
-			end   = covert_position_to_lsp(node.end),
+			start = location_to_position(node.start),
+			end   = location_to_position(node.end),
 		},
 	}
 
 	return send_message(response)
 }
 
-covert_position_to_lsp :: proc(location: hep.Location) -> Position {
+location_to_position :: proc(location: hep.Location) -> Position {
 	return {
-		line      = location.line - 1,
+		line      = location.line   - 1,
 		character = location.column - 1,
+	}
+}
+
+position_to_location :: proc(location: Position) -> hep.Location {
+	return {
+		line   = location.line      + 1,
+		column = location.character + 1,
 	}
 }

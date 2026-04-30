@@ -2,67 +2,68 @@ package hepls
 
 import "core:fmt"
 
+import hep "hephaistos"
 import "hephaistos/ast"
 import "hephaistos/types"
 
 @(require_results)
-position_in_node :: proc(node: ^ast.Node, position: Position) -> bool {
+location_in_node :: proc(node: ^ast.Node, location: hep.Location) -> bool {
 	if node == nil {
 		return false
 	}
 
-	if node.start.line > position.line {
+	if node.start.line > location.line {
 		return false
 	}
-	if node.end.line < position.line {
+	if node.end.line < location.line {
 		return false
 	}
-	if node.start.line == position.line && node.start.column > position.character {
+	if node.start.line == location.line && node.start.column > location.column {
 		return false
 	}
-	if node.end.line == position.line && node.end.column <= position.character {
+	if node.end.line == location.line && node.end.column < location.column {
 		return false
 	}
 	return true
 }
 
 @(require_results)
-hovered_node_in_block :: proc(stmts: []^ast.Stmt, position: Position) -> ^ast.Node {
+hovered_node_in_block :: proc(stmts: []^ast.Stmt, location: hep.Location) -> ^ast.Node {
 	for node in stmts {
-		position_in_node(node, position) or_continue
-		return hovered_sub_node(node, position)
+		location_in_node(node, location) or_continue
+		return hovered_sub_node(node, location)
 	}
 
 	return nil
 }
 
 @(require_results)
-hovered_field :: proc(field: ast.Field, position: Position) -> ^ast.Node {
-	if position_in_node(field.name, position) {
-		return hovered_sub_node(field.name, position)
+hovered_field :: proc(field: ast.Field, location: hep.Location) -> ^ast.Node {
+	if location_in_node(field.name, location) {
+		return hovered_sub_node(field.name, location)
 	}
-	if position_in_node(field.type, position) {
-		return hovered_sub_node(field.type, position)
+	if location_in_node(field.type, location) {
+		return hovered_sub_node(field.type, location)
 	}
-	if position_in_node(field.value, position) {
-		return hovered_sub_node(field.value, position)
+	if location_in_node(field.value, location) {
+		return hovered_sub_node(field.value, location)
 	}
-	if position_in_node(field.location, position) {
-		return hovered_sub_node(field.location, position)
+	if location_in_node(field.location, location) {
+		return hovered_sub_node(field.location, location)
 	}
 
 	return nil
 }
 
 @(require_results)
-hovered_proc_sig :: proc(sig: ^ast.Expr_Proc_Sig, position: Position) -> ^ast.Node {
+hovered_proc_sig :: proc(sig: ^ast.Expr_Proc_Sig, location: hep.Location) -> ^ast.Node {
 	for arg in sig.args {
-		if f := hovered_field(arg, position); f != nil {
+		if f := hovered_field(arg, location); f != nil {
 			return f
 		}
 	}
 	for ret in sig.returns {
-		if f := hovered_field(ret, position); f != nil {
+		if f := hovered_field(ret, location); f != nil {
 			return f
 		}
 	}
@@ -71,8 +72,8 @@ hovered_proc_sig :: proc(sig: ^ast.Expr_Proc_Sig, position: Position) -> ^ast.No
 }
 
 @(require_results)
-hovered_sub_node :: proc(node: ^ast.Node, position: Position) -> ^ast.Node {
-	if !position_in_node(node, position) {
+hovered_sub_node :: proc(node: ^ast.Node, location: hep.Location) -> ^ast.Node {
+	if !location_in_node(node, location) {
 		return nil
 	}
 
@@ -80,225 +81,243 @@ hovered_sub_node :: proc(node: ^ast.Node, position: Position) -> ^ast.Node {
 	case ^ast.Expr_Constant, ^ast.Expr_Ident, ^ast.Expr_Interface, ^ast.Expr_Directive:
 		return node
 	case ^ast.Expr_Binary:
-		if position_in_node(v.lhs, position) {
-			return hovered_sub_node(v.lhs, position)
+		if location_in_node(v.lhs, location) {
+			return hovered_sub_node(v.lhs, location)
 		}
-		if position_in_node(v.rhs, position) {
-			return hovered_sub_node(v.rhs, position)
+		if location_in_node(v.rhs, location) {
+			return hovered_sub_node(v.rhs, location)
 		}
 	case ^ast.Expr_Proc_Lit:
-		if h := hovered_proc_sig(v, position); h != nil {
+		if h := hovered_proc_sig(v, location); h != nil {
 			return h
 		}
-		if n := hovered_node_in_block(v.body, position); n != nil {
+		if n := hovered_node_in_block(v.body, location); n != nil {
 			return n
 		}
 	case ^ast.Expr_Proc_Sig:
-		if h := hovered_proc_sig(v, position); h != nil {
+		if h := hovered_proc_sig(v, location); h != nil {
 			return h
 		}
 	case ^ast.Expr_Proc_Group:
 		for m in v.members {
-			if position_in_node(m, position) {
-				return hovered_sub_node(m, position)
+			if location_in_node(m, location) {
+				return hovered_sub_node(m, location)
 			}
 		}
 	case ^ast.Expr_Paren:
-		if position_in_node(v.expr, position) {
-			return hovered_sub_node(v.expr, position)
+		if location_in_node(v.expr, location) {
+			return hovered_sub_node(v.expr, location)
 		}
 	case ^ast.Expr_Selector:
-		if position_in_node(v.lhs, position) {
-			return hovered_sub_node(v.lhs, position)
+		if location_in_node(v.lhs, location) {
+			return hovered_sub_node(v.lhs, location)
 		}
-		if position_in_node(v.selector, position) {
-			return hovered_sub_node(v.selector, position)
+		if location_in_node(v.selector, location) {
+			return hovered_sub_node(v.selector, location)
 		}
 	case ^ast.Expr_Call:
-		if position_in_node(v.lhs, position) {
-			return hovered_sub_node(v.lhs, position)
+		if location_in_node(v.lhs, location) {
+			return hovered_sub_node(v.lhs, location)
 		}
 		for value in v.args {
-			if f := hovered_field(value, position); f != nil {
+			if f := hovered_field(value, location); f != nil {
 				return f
 			}
 		}
 	case ^ast.Expr_Compound:
-		if position_in_node(v.type_expr, position) {
-			return hovered_sub_node(v.type_expr, position)
+		if location_in_node(v.type_expr, location) {
+			return hovered_sub_node(v.type_expr, location)
 		}
 		for value in v.fields {
-			if f := hovered_field(value, position); f != nil {
+			if f := hovered_field(value, location); f != nil {
 				return f
 			}
 		}
 	case ^ast.Expr_Index:
-		if position_in_node(v.lhs, position) {
-			return hovered_sub_node(v.lhs, position)
+		if location_in_node(v.lhs, location) {
+			return hovered_sub_node(v.lhs, location)
 		}
-		if position_in_node(v.rhs, position) {
-			return hovered_sub_node(v.rhs, position)
+		if location_in_node(v.rhs, location) {
+			return hovered_sub_node(v.rhs, location)
 		}
 	case ^ast.Expr_Cast:
-		if position_in_node(v.value, position) {
-			return hovered_sub_node(v.value, position)
+		if location_in_node(v.value, location) {
+			return hovered_sub_node(v.value, location)
 		}
-		if position_in_node(v.type_expr, position) {
-			return hovered_sub_node(v.type_expr, position)
+		if location_in_node(v.type_expr, location) {
+			return hovered_sub_node(v.type_expr, location)
 		}
 	case ^ast.Expr_Unary:
-		if position_in_node(v.expr, position) {
-			return hovered_sub_node(v.expr, position)
+		if location_in_node(v.expr, location) {
+			return hovered_sub_node(v.expr, location)
 		}
 	case ^ast.Expr_Ternary:
-		if position_in_node(v.cond, position) {
-			return hovered_sub_node(v.cond, position)
+		if location_in_node(v.cond, location) {
+			return hovered_sub_node(v.cond, location)
 		}
-		if position_in_node(v.then_expr, position) {
-			return hovered_sub_node(v.then_expr, position)
+		if location_in_node(v.then_expr, location) {
+			return hovered_sub_node(v.then_expr, location)
 		}
-		if position_in_node(v.else_expr, position) {
-			return hovered_sub_node(v.else_expr, position)
+		if location_in_node(v.else_expr, location) {
+			return hovered_sub_node(v.else_expr, location)
 		}
 	case ^ast.Expr_Ellipsis:
-		if position_in_node(v.expr, position) {
-			return hovered_sub_node(v.expr, position)
+		if location_in_node(v.expr, location) {
+			return hovered_sub_node(v.expr, location)
 		}
 
 	case ^ast.Type_Struct:
 		for field in v.fields {
-			if f := hovered_field(field, position); f != nil {
+			if f := hovered_field(field, location); f != nil {
 				return f
 			}
 		}
 	case ^ast.Type_Array:
-		if position_in_node(v.count, position) {
-			return hovered_sub_node(v.count, position)
+		if location_in_node(v.count, location) {
+			return hovered_sub_node(v.count, location)
 		}
-		if position_in_node(v.elem, position) {
-			return hovered_sub_node(v.elem, position)
+		if location_in_node(v.elem, location) {
+			return hovered_sub_node(v.elem, location)
 		}
 	case ^ast.Type_Matrix:
-		if position_in_node(v.rows, position) {
-			return hovered_sub_node(v.rows, position)
+		if location_in_node(v.rows, location) {
+			return hovered_sub_node(v.rows, location)
 		}
-		if position_in_node(v.cols, position) {
-			return hovered_sub_node(v.cols, position)
+		if location_in_node(v.cols, location) {
+			return hovered_sub_node(v.cols, location)
 		}
-		if position_in_node(v.elem, position) {
-			return hovered_sub_node(v.elem, position)
+		if location_in_node(v.elem, location) {
+			return hovered_sub_node(v.elem, location)
 		}
 	case ^ast.Type_Image:
-		if position_in_node(v.dimensions, position) {
-			return hovered_sub_node(v.dimensions, position)
+		if location_in_node(v.dimensions, location) {
+			return hovered_sub_node(v.dimensions, location)
 		}
-		if position_in_node(v.texel_type, position) {
-			return hovered_sub_node(v.texel_type, position)
+		if location_in_node(v.texel_type, location) {
+			return hovered_sub_node(v.texel_type, location)
 		}
 	case ^ast.Type_Enum:
 		for value in v.values {
-			if f := hovered_field(value, position); f != nil {
+			if f := hovered_field(value, location); f != nil {
 				return f
 			}
 		}
 	case ^ast.Type_Bit_Set:
-		if position_in_node(v.enum_type, position) {
-			return hovered_sub_node(v.enum_type, position)
+		if location_in_node(v.enum_type, location) {
+			return hovered_sub_node(v.enum_type, location)
 		}
-		if position_in_node(v.backing, position) {
-			return hovered_sub_node(v.backing, position)
+		if location_in_node(v.backing, location) {
+			return hovered_sub_node(v.backing, location)
 		}
 
 	case ^ast.Stmt_Return:
 		for value in v.values {
-			if position_in_node(value, position) {
-				return hovered_sub_node(value, position)
+			if location_in_node(value, location) {
+				return hovered_sub_node(value, location)
 			}
 		}
 	case ^ast.Stmt_Break:
 	case ^ast.Stmt_Continue:
 	case ^ast.Stmt_For_Range:
-		if position_in_node(v.start_expr, position) {
-			return hovered_sub_node(v.start_expr, position)
+		if location_in_node(v.start_expr, location) {
+			return hovered_sub_node(v.start_expr, location)
 		}
-		if position_in_node(v.end_expr, position) {
-			return hovered_sub_node(v.end_expr, position)
+		if location_in_node(v.end_expr, location) {
+			return hovered_sub_node(v.end_expr, location)
 		}
-		if position_in_node(v.variable, position) {
-			return hovered_sub_node(v.variable, position)
+		if location_in_node(v.variable, location) {
+			return hovered_sub_node(v.variable, location)
 		}
-		if n := hovered_node_in_block(v.body, position); n != nil {
+		if n := hovered_node_in_block(v.body, location); n != nil {
 			return n
 		}
 	case ^ast.Stmt_For:
-		if n := hovered_node_in_block(v.body, position); n != nil {
+		if location_in_node(v.init, location) {
+			return hovered_sub_node(v.init, location)
+		}
+		if location_in_node(v.cond, location) {
+			return hovered_sub_node(v.cond, location)
+		}
+		if location_in_node(v.post, location) {
+			return hovered_sub_node(v.post, location)
+		}
+		if n := hovered_node_in_block(v.body, location); n != nil {
 			return n
 		}
 	case ^ast.Stmt_Block:
-		if n := hovered_node_in_block(v.body, position); n != nil {
+		if n := hovered_node_in_block(v.body, location); n != nil {
 			return n
 		}
 	case ^ast.Stmt_If:
-		if n := hovered_node_in_block(v.then_block, position); n != nil {
+		if location_in_node(v.init, location) {
+			return hovered_sub_node(v.init, location)
+		}
+		if location_in_node(v.cond, location) {
+			return hovered_sub_node(v.cond, location)
+		}
+		if n := hovered_node_in_block(v.then_block, location); n != nil {
 			return n
 		}
-		if n := hovered_node_in_block(v.else_block, position); n != nil {
+		if n := hovered_node_in_block(v.else_block, location); n != nil {
 			return n
 		}
 	case ^ast.Stmt_Switch:
 		// TODO
 	case ^ast.Stmt_Assign:
 		for l in v.lhs {
-			if position_in_node(l, position) {
-				return hovered_sub_node(l, position)
+			if location_in_node(l, location) {
+				return hovered_sub_node(l, location)
 			}
 		}
 
 		for r in v.rhs {
-			if position_in_node(r, position) {
-				return hovered_sub_node(r, position)
+			if location_in_node(r, location) {
+				return hovered_sub_node(r, location)
 			}
 		}
 	case ^ast.Stmt_Expr:
-		return hovered_sub_node(v.expr, position)
+		return hovered_sub_node(v.expr, location)
 	case ^ast.Stmt_When:
-		n := hovered_node_in_block(v.then_block, position)
+		if location_in_node(v.cond, location) {
+			return hovered_sub_node(v.cond, location)
+		}
+		n := hovered_node_in_block(v.then_block, location)
 		if n != nil {
 			return n
 		}
-		n = hovered_node_in_block(v.else_block, position)
+		n = hovered_node_in_block(v.else_block, location)
 		if n != nil {
 			return n
 		}
 
 	case ^ast.Decl_Value:
 		for a in v.attributes {
-			if f := hovered_field(a, position); f != nil {
+			if f := hovered_field(a, location); f != nil {
 				return f
 			}
 		}
 
-		if position_in_node(v.type_expr, position) {
-			return hovered_sub_node(v.type_expr, position)
+		if location_in_node(v.type_expr, location) {
+			return hovered_sub_node(v.type_expr, location)
 		}
 
 		for l in v.lhs {
-			if position_in_node(l, position) {
-				return hovered_sub_node(l, position)
+			if location_in_node(l, location) {
+				return hovered_sub_node(l, location)
 			}
 		}
 
 		for v in v.values {
-			if position_in_node(v, position) {
-				return hovered_sub_node(v, position)
+			if location_in_node(v, location) {
+				return hovered_sub_node(v, location)
 			}
 		}
 	case ^ast.Decl_Import:
-		if position_in_node(v.path, position) {
-			return hovered_sub_node(v.path, position)
+		if location_in_node(v.path, location) {
+			return hovered_sub_node(v.path, location)
 		}
-		if position_in_node(v.alias, position) {
-			return hovered_sub_node(v.alias, position)
+		if location_in_node(v.alias, location) {
+			return hovered_sub_node(v.alias, location)
 		}
 	}
 
@@ -307,9 +326,10 @@ hovered_sub_node :: proc(node: ^ast.Node, position: Position) -> ^ast.Node {
 
 @(require_results)
 node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) -> string {
-	type:  ^types.Type
-	value:  types.Const_Value
-	prefix: string
+	type:   ^types.Type
+	value:   types.Const_Value
+	prefix:  string
+	entity: ^ast.Entity
 
 	switch v in node.derived {
 	case ^ast.Expr_Constant:
@@ -320,6 +340,7 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 		value  = v.const_value
 	case ^ast.Expr_Ident:
 		prefix = fmt.tprintf("%s: ", v.text)
+		entity = v.entity
 		type   = v.type
 		value  = v.const_value
 	case ^ast.Expr_Proc_Lit:
@@ -337,6 +358,7 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 	case ^ast.Expr_Selector:
 		type   = v.type
 		value  = v.const_value
+		entity = v.entity
 	case ^ast.Expr_Call:
 		type   = v.type
 		value  = v.const_value
@@ -395,15 +417,34 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 	case ^ast.Decl_Import:
 	}
 
-	if type == nil {
+	type_string: string
+	if type != nil {
+		type_string = types.to_string(type, context.temp_allocator)
+	}
+	if entity != nil {
+		#partial switch entity.kind {
+		case .Library:
+			type_string = "library"
+		case .Builtin:
+			type_string = "builtin"
+		case .Label:
+			type_string = "label"
+		case .Type:
+			type_string = "type"
+		case:
+			type_string = types.to_string(type, context.temp_allocator)
+		}
+	}
+
+	if type_string == "" {
 		return ""
 	}
+
 
 	suffix: string
 	if value != nil {
 		suffix = fmt.tprintf(" (%v)", value)
 	}
-	type_string := types.to_string(type, context.temp_allocator)
 	return fmt.aprint(
 		"```odin\n",
 		prefix,
@@ -414,3 +455,18 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 		allocator = allocator,
 	)
 }
+
+@(require_results)
+node_definition :: proc(node: ^ast.Node) -> ^ast.Node {
+	#partial switch v in node.derived {
+	case ^ast.Expr_Ident:
+		e := v.entity
+		if e == nil {
+			return nil
+		}
+		return e.ident
+	}
+
+	return nil
+}
+

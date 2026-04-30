@@ -20,7 +20,7 @@ position_in_node :: proc(node: ^ast.Node, position: Position) -> bool {
 	if node.start.line == position.line && node.start.column > position.character {
 		return false
 	}
-	if node.end.line == position.line && node.end.column < position.character {
+	if node.end.line == position.line && node.end.column <= position.character {
 		return false
 	}
 	return true
@@ -38,6 +38,9 @@ hovered_node_in_block :: proc(stmts: []^ast.Stmt, position: Position) -> ^ast.No
 
 @(require_results)
 hovered_field :: proc(field: ast.Field, position: Position) -> ^ast.Node {
+	if position_in_node(field.name, position) {
+		return hovered_sub_node(field.name, position)
+	}
 	if position_in_node(field.type, position) {
 		return hovered_sub_node(field.type, position)
 	}
@@ -78,7 +81,7 @@ hovered_sub_node :: proc(node: ^ast.Node, position: Position) -> ^ast.Node {
 		return node
 	case ^ast.Expr_Binary:
 		if position_in_node(v.lhs, position) {
-			return hovered_sub_node(v.rhs, position)
+			return hovered_sub_node(v.lhs, position)
 		}
 		if position_in_node(v.rhs, position) {
 			return hovered_sub_node(v.rhs, position)
@@ -107,6 +110,9 @@ hovered_sub_node :: proc(node: ^ast.Node, position: Position) -> ^ast.Node {
 	case ^ast.Expr_Selector:
 		if position_in_node(v.lhs, position) {
 			return hovered_sub_node(v.lhs, position)
+		}
+		if position_in_node(v.selector, position) {
+			return hovered_sub_node(v.selector, position)
 		}
 	case ^ast.Expr_Call:
 		if position_in_node(v.lhs, position) {
@@ -266,6 +272,12 @@ hovered_sub_node :: proc(node: ^ast.Node, position: Position) -> ^ast.Node {
 		}
 
 	case ^ast.Decl_Value:
+		for a in v.attributes {
+			if f := hovered_field(a, position); f != nil {
+				return f
+			}
+		}
+
 		if position_in_node(v.type_expr, position) {
 			return hovered_sub_node(v.type_expr, position)
 		}
@@ -282,6 +294,12 @@ hovered_sub_node :: proc(node: ^ast.Node, position: Position) -> ^ast.Node {
 			}
 		}
 	case ^ast.Decl_Import:
+		if position_in_node(v.path, position) {
+			return hovered_sub_node(v.path, position)
+		}
+		if position_in_node(v.alias, position) {
+			return hovered_sub_node(v.alias, position)
+		}
 	}
 
 	return node
@@ -301,7 +319,7 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 		type   = v.type
 		value  = v.const_value
 	case ^ast.Expr_Ident:
-		prefix = fmt.tprintf("%s: ", v.ident.text)
+		prefix = fmt.tprintf("%s: ", v.text)
 		type   = v.type
 		value  = v.const_value
 	case ^ast.Expr_Proc_Lit:

@@ -12,6 +12,7 @@ import "core:strconv"
 import "core:strings"
 import "core:encoding/json"
 import vmem "core:mem/virtual"
+import "core:mem"
 
 import hep "hephaistos"
 
@@ -35,7 +36,21 @@ main :: proc() {
 	context.logger = log.create_file_logger(log_file, lowest = .Info, allocator = context.allocator)
 	defer log.destroy_file_logger(context.logger, allocator = context.allocator)
 
-	// TODO(Franz): (init doc-format)
+	when ODIN_DEBUG {
+		track: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&track, context.allocator)
+		defer mem.tracking_allocator_destroy(&track)
+		context.allocator = mem.tracking_allocator(&track)
+
+		defer for _, leak in track.allocation_map {
+			log.infof("%v leaked %m\n", leak.location, leak.size)
+		}
+		defer for free in track.bad_free_array {
+			log.errorf("%v was freed badly %m\n", free.location)
+		}
+	}
+
+	// TODO(Franz): fetch shared types (somehow)
 
 	state: State
 	arena_err := vmem.arena_init_growing(&state.ast_arena)
@@ -128,6 +143,7 @@ requests_map := map[string]proc(state: ^State, contents: []byte) -> (error: Erro
 	"textDocument/didSave"    = notification_did_save_text_document,
 	"textDocument/completion" = request_completion,
 	"textDocument/hover"      = request_hover,
+	"textDocument/definition" = request_definition,
 	"shutdown"                = request_shutdown,
 	"initialize"              = request_initialize,
 	"initialized"             = notification_initialized,
@@ -285,8 +301,9 @@ request_initialize :: proc(state: ^State, contents: []byte) -> (error: Error) {
 				version = "0.0.1",
 			},
 			capabilities = {
-				textDocumentSync = .Full,
-				hoverProvider    = true,
+				textDocumentSync   = .Full,
+				hoverProvider      = true,
+				definitionProvider = true,
 			},
 		},
 	}
@@ -309,6 +326,7 @@ Capabilities :: struct {
 	textDocumentSync:   Text_Document_Sync_Kind,
 	completionProvider: Completion_Options,
 	hoverProvider:      bool,
+	definitionProvider: bool,
 }
 
 Completion_Options :: struct {}
@@ -333,6 +351,8 @@ Response_Result :: union {
 	Initialize_Result,
 	Completion_Result,
 	Hover_Result,
+	Location,
+	[]Location,
 }
 
 Base_Response :: struct {
@@ -448,4 +468,50 @@ request_hover :: proc(state: ^State, content: []byte) -> Error {
 	}
 
 	return send_message(response)
+}
+
+Definition_Params :: struct {
+	using _: Text_Document_Position_Params,
+}
+
+Location :: struct {
+	uri:   Uri,
+	range: Range,
+}
+
+request_definition :: proc(state: ^State, content: []byte) -> Error {
+	request: Request(Definition_Params)
+	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
+	params := request.params
+
+	position           := params.position
+	position.line      += 1
+	position.character += 1
+
+	node := hovered_node_in_block(state.ast, position)
+
+	response: Response = {
+		id = request.id,
+	}
+
+	if node == nil {
+		return send_message(response)
+	}
+
+	response.result = Location {
+		uri   = params.textDocument.uri,
+		range = {
+			start = covert_position_to_lsp(node.start),
+			end   = covert_position_to_lsp(node.end),
+		},
+	}
+
+	return send_message(response)
+}
+
+covert_position_to_lsp :: proc(location: hep.Location) -> Position {
+	return {
+		line      = location.line - 1,
+		character = location.column - 1,
+	}
 }

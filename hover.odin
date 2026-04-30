@@ -262,7 +262,20 @@ hovered_sub_node :: proc(node: ^ast.Node, location: hep.Location) -> ^ast.Node {
 			return n
 		}
 	case ^ast.Stmt_Switch:
-		// TODO
+		if location_in_node(v.init, location) {
+			return hovered_sub_node(v.init, location)
+		}
+		if location_in_node(v.cond, location) {
+			return hovered_sub_node(v.cond, location)
+		}
+		for c in v.cases {
+			if location_in_node(c.value, location) {
+				return hovered_sub_node(c.value, location)
+			}
+			if n := hovered_node_in_block(c.body, location); n != nil {
+				return n
+			}
+		}
 	case ^ast.Stmt_Assign:
 		for l in v.lhs {
 			if location_in_node(l, location) {
@@ -440,10 +453,13 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 		return ""
 	}
 
-
 	suffix: string
 	if value != nil {
 		suffix = fmt.tprintf(" (%v)", value)
+
+		if _, ok := value.(string); ok {
+			type_string = "string"
+		}
 	}
 	return fmt.aprint(
 		"```odin\n",

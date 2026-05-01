@@ -22,8 +22,6 @@ command = "hepls"
 
 ## Missing Features
 - Completion
-- Hover
-- Go to definition
 - Shared types
 - Defines
 - Libraries (other than `core` & `base`)

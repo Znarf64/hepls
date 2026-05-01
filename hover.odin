@@ -486,4 +486,3 @@ node_definition :: proc(node: ^ast.Node) -> ^ast.Node {
 
 	return nil
 }
-

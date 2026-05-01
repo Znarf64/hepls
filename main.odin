@@ -22,10 +22,22 @@ Error :: union {
 }
 
 State :: struct {
-	initialized: bool,
-	shutdown:    bool,
-	ast:         []^hep.Ast_Stmt,
-	ast_arena:   vmem.Arena,
+	initialized:  bool,
+	shutdown:     bool,
+
+	ast:           []^hep.Ast_Stmt,
+	ast_arena:     vmem.Arena,
+	shared_types:  map[string]^hep.Type,
+	checker_flags: hep.Checker_Flags,
+	config:        Config,
+}
+
+Config :: struct {
+	odin_command:        string,
+	checker_only_saved:  bool,
+	shared_type_sources: []string,
+	defines:             map[string]hep.Const_Value,
+	checker_flags:       []hep.Checker_Flag,
 }
 
 main :: proc() {
@@ -33,7 +45,7 @@ main :: proc() {
 	if err != 0 {
 		return
 	}
-	context.logger = log.create_file_logger(log_file, lowest = .Info, allocator = context.allocator)
+	context.logger = log.create_file_logger(log_file, lowest = .Debug, allocator = context.allocator)
 	defer log.destroy_file_logger(context.logger, allocator = context.allocator)
 
 	when ODIN_DEBUG {
@@ -50,9 +62,48 @@ main :: proc() {
 		}
 	}
 
-	// TODO(Franz): fetch shared types (somehow)
+	state: State = {
+		config = { odin_command = "odin", },
+	}
 
-	state: State
+	global_config: {
+		global_config_path, _ := os.join_path({ os.dir(os.args[0]), "hepls.json", }, context.temp_allocator)
+		global_config_data    := os.read_entire_file(global_config_path, context.temp_allocator) or_break global_config
+		err                   := json.unmarshal(global_config_data, &state.config)
+		if err != nil {
+			log.error("Failed to load global config:", err)
+		}
+	}
+
+	local_config: {
+		local_config_path := "hepls.json"
+		local_config_data := os.read_entire_file(local_config_path, context.temp_allocator) or_break local_config
+		err               := json.unmarshal(local_config_data, &state.config)
+		if err != nil {
+			log.error("Failed to load local config:", err)
+		}
+	}
+
+	log.debug("config:", state.config)
+
+	state.shared_types = make(map[string]^hep.Type, context.allocator)
+	if len(state.config.shared_type_sources) == 0 {
+		// this should be a pretty reasonable guess
+		state.config.shared_type_sources = { ".", "..", "../src", "src", }
+	}
+	for pkg in state.config.shared_type_sources {
+		ok := get_package_types(state.config, pkg, &state.shared_types, context.allocator)
+		if !ok {
+			log.error("Failed to load types from package:", pkg)
+		}
+	}
+
+	for flag in state.config.checker_flags {
+		state.checker_flags += { flag, }
+	}
+
+	log.debug("shared types:", state.shared_types)
+
 	arena_err := vmem.arena_init_growing(&state.ast_arena)
 	log.assert(arena_err == nil)
 	defer vmem.arena_destroy(&state.ast_arena)
@@ -167,7 +218,7 @@ notification_did_change_text_document :: proc(state: ^State, content: []byte) ->
 	json.unmarshal(content, &notification, allocator = context.temp_allocator) or_return
 	params := notification.params
 
-	return check_file(state, params.contentChanges[0].text, params.textDocument.uri)
+	return check_file(state, params.contentChanges[0].text, params.textDocument.uri, !state.config.checker_only_saved)
 }
 
 notification_did_save_text_document :: proc(state: ^State, content: []byte) -> (error: Error) {

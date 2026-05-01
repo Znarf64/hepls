@@ -6,7 +6,7 @@ import vmem "core:mem/virtual"
 import hep "hephaistos"
 
 @(require_results)
-check_file :: proc(state: ^State, source: string, uri: Uri) -> (error: Error) {
+check_file :: proc(state: ^State, source: string, uri: Uri, show_errors: bool = true) -> (error: Error) {
 	errors, code := check_file_internal(state, source, context.temp_allocator)
 
 	diagnostics := make([]Diagnostic, len(errors), context.temp_allocator)
@@ -59,10 +59,10 @@ check_file_internal :: proc(state: ^State, source: string, error_allocator := co
 	checker: hep.Checker
 	checker, errors = hep.check(
 		state.ast,
-		defines         = {},
-		types           = {},
+		defines         = state.config.defines,
+		types           = state.shared_types,
 		libraries       = {},
-		flags           = {},
+		flags           = state.checker_flags,
 		allocator       = ast_allocator,
 		error_allocator = error_allocator,
 	)

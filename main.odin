@@ -41,12 +41,14 @@ Config :: struct {
 }
 
 main :: proc() {
-	log_file, err := os.open("log.txt", { .Create, .Read, .Write, .Trunc, }, os.Permissions_Default_File)
-	if err != 0 {
-		return
+	when ODIN_DEBUG {
+		log_file, err := os.open("log.txt", { .Create, .Read, .Write, .Trunc, }, os.Permissions_Default_File)
+		if err != 0 {
+			return
+		}
+		context.logger = log.create_file_logger(log_file, lowest = .Debug, allocator = context.allocator)
+		defer log.destroy_file_logger(context.logger, allocator = context.allocator)
 	}
-	context.logger = log.create_file_logger(log_file, lowest = .Debug, allocator = context.allocator)
-	defer log.destroy_file_logger(context.logger, allocator = context.allocator)
 
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -63,7 +65,11 @@ main :: proc() {
 	}
 
 	state: State = {
-		config = { odin_command = "odin", },
+		config = {
+			odin_command        = "odin",
+			// NOTE: paths are reverse ordered by likelihood of being what the user wants, since types may overwrite each other
+			shared_type_sources = { "src", "../src", "..", ".", },
+		},
 	}
 
 	global_config: {
@@ -87,10 +93,6 @@ main :: proc() {
 	log.debug("config:", state.config)
 
 	state.shared_types = make(map[string]^hep.Type, context.allocator)
-	if len(state.config.shared_type_sources) == 0 {
-		// this should be a pretty reasonable guess
-		state.config.shared_type_sources = { ".", "..", "../src", "src", }
-	}
 	for pkg in state.config.shared_type_sources {
 		ok := get_package_types(state.config, pkg, &state.shared_types, context.allocator)
 		if !ok {

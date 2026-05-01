@@ -22,7 +22,4 @@ command = "hepls"
 
 ## Missing Features
 - Completion
-- Shared types
-- Defines
-- Libraries (other than `core` & `base`)
-- Configuration
+- Libraries (other than `exntensions` & `base`)

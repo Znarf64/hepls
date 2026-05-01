@@ -2,6 +2,7 @@ package hepls
 
 import "base:runtime"
 
+import "core:log"
 import "core:dynlib"
 import "core:fmt"
 import "core:os"
@@ -64,15 +65,18 @@ get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.
 	}
 
 	assert(config.odin_command != "")
-	state: os.Process_State
-	state, _, _, err = os.process_exec({
+	state, stdout, stderr, odin_err := os.process_exec({
 		command = { config.odin_command, "build", ".", "-build-mode:shared", "-out:lib." + dynlib.LIBRARY_FILE_EXTENSION, "-o:none", },
 
 	}, context.temp_allocator)
-	if err != nil {
+	if odin_err != nil {
+		log.error("Failed to run odin compiler")
 		return
 	}
 	if state.exit_code != 0 {
+		log.error("Failed to run odin compiler")
+		log.error("stdout:", string(stdout))
+		log.error("stderr:", string(stderr))
 		return
 	}
 

@@ -555,6 +555,7 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 	return send_message(response)
 }
 
+@(require_results)
 location_to_position :: proc(location: hep.Location) -> Position {
 	return {
 		line      = location.line   - 1,
@@ -562,6 +563,7 @@ location_to_position :: proc(location: hep.Location) -> Position {
 	}
 }
 
+@(require_results)
 position_to_location :: proc(location: Position) -> hep.Location {
 	return {
 		line   = location.line      + 1,

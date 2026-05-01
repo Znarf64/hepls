@@ -442,10 +442,10 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 		case .Type:
 			type_string = "type"
 		case:
-			type_string = types.to_string(type, context.temp_allocator)
+			type_string = types.to_string(type, true, context.temp_allocator)
 		}
 	} else if type != nil {
-		type_string = types.to_string(type, context.temp_allocator)
+		type_string = types.to_string(type, true, context.temp_allocator)
 	}
 
 	if type_string == "" {

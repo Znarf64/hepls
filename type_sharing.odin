@@ -7,6 +7,7 @@ import "core:dynlib"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:unicode"
 
 import hep       "hephaistos"
 import hep_types "hephaistos/types"
@@ -32,7 +33,47 @@ _main :: proc() {{
 
 @(require_results)
 get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.Type, allocator := context.allocator) -> (ok: bool) {
-	path, err := os.get_absolute_path(path, context.temp_allocator)
+	dir_file, err := os.open(path)
+	if err != nil {
+		return
+	}
+	defer os.close(dir_file)
+
+	iter := os.read_directory_iterator_create(dir_file)
+	defer os.read_directory_iterator_destroy(&iter)
+
+	package_name: string
+	for file, _ in os.read_directory_iterator(&iter) {
+		if !strings.has_suffix(file.name, ".odin") {
+			continue
+		}
+		data, err := os.read_entire_file(file.fullpath, context.temp_allocator)
+		if err != nil {
+			return
+		}
+		for line in strings.split_lines_iterator((^string)(&data)) {
+			if !strings.has_prefix(line, "package ") {
+				continue
+			}
+			package_name = strings.trim_left_space(line[len("package "):])
+			for r, i in package_name {
+				if unicode.is_letter(r) || unicode.is_number(r) || r == '_' {
+					continue
+				}
+				package_name = package_name[:i]
+				break
+			}
+			break
+		}
+		break
+	}
+
+	if package_name == "" {
+		return
+	}
+
+	absolute_path: string
+	absolute_path, err = os.get_absolute_path(path, context.temp_allocator)
 	if err != nil {
 		return
 	}
@@ -54,7 +95,7 @@ get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.
 	defer os.set_working_directory(wd)
 
 	relative: string
-	relative, err = os.get_relative_path(dir, path, context.temp_allocator)
+	relative, err = os.get_relative_path(dir, absolute_path, context.temp_allocator)
 	if err != nil {
 		return
 	}
@@ -84,8 +125,6 @@ get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.
 	defer dynlib.unload_library(lib)
 
 	get_type_table := cast(proc() -> []^runtime.Type_Info)dynlib.symbol_address(lib, "get_type_table")
-
-	package_name := os.base(path)
 
 	type_table := get_type_table()
 	for type in type_table {

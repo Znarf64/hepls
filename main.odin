@@ -525,15 +525,15 @@ Hover_Params :: struct {
 	using _: Text_Document_Position_Params,
 }
 
-MarkupKind :: distinct string
+Markup_Kind :: distinct string
 
-MarkupContent :: struct {
-	kind:  MarkupKind,
+Markup_Content :: struct {
+	kind:  Markup_Kind,
 	value: string,
 }
 
 Hover_Result :: struct {
-	contents: MarkupContent,
+	contents: Markup_Content,
 	range:    Maybe(Range),
 }
 
@@ -805,6 +805,5 @@ request_rename :: proc(state: ^State, content: []byte) -> Error {
 		changes = changes,
 	}
 
-	log.info(response)
 	return send_message(response)
 }

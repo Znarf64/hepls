@@ -1,6 +1,7 @@
 package hepls
 
 import "core:fmt"
+import "core:slice"
 
 import hep "hephaistos"
 import "hephaistos/ast"
@@ -29,12 +30,25 @@ location_in_node :: proc(node: ^ast.Node, location: hep.Location) -> bool {
 
 @(require_results)
 hovered_node_in_block :: proc(stmts: []^ast.Stmt, location: hep.Location) -> ^ast.Node {
-	for node in stmts {
-		location_in_node(node, location) or_continue
-		return hovered_sub_node(node, location)
+	index, ok := slice.binary_search_by(stmts, location, proc(node: ^ast.Stmt, location: hep.Location) -> slice.Ordering {
+		if node.start.line > location.line {
+			return .Greater
+		}
+		if node.end.line < location.line {
+			return .Less
+		}
+		if node.start.line == location.line && node.start.column > location.column {
+			return .Greater
+		}
+		if node.end.line == location.line && node.end.column < location.column {
+			return .Less
+		}
+		return .Equal
+	})
+	if !ok {
+		return nil
 	}
-
-	return nil
+	return hovered_sub_node(stmts[index], location)
 }
 
 @(require_results)

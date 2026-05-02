@@ -2,6 +2,7 @@
 package hepls
 
 import "base:intrinsics"
+import "base:runtime"
 
 import "core:bufio"
 import "core:fmt"
@@ -21,13 +22,18 @@ Error :: union {
 	json.Marshal_Error,
 }
 
+Ast :: struct {
+	stmts: []^hep.Ast_Stmt,
+	arena: vmem.Arena,
+}
+
 State :: struct {
 	initialized:  bool,
 	shutdown:     bool,
 
-	ast:           []^hep.Ast_Stmt,
-	ast_arena:     vmem.Arena,
+	asts:          map[Uri]Ast,
 	shared_types:  map[string]^hep.Type,
+	libraries:     map[string]hep.Library,
 	checker_flags: hep.Checker_Flags,
 	config:        Config,
 }
@@ -38,6 +44,7 @@ Config :: struct {
 	shared_type_sources: []string,
 	defines:             map[string]hep.Const_Value,
 	checker_flags:       []hep.Checker_Flag,
+	libraries:           map[string]string,
 }
 
 main :: proc() {
@@ -49,6 +56,8 @@ main :: proc() {
 		context.logger = log.create_file_logger(log_file, lowest = .Debug, allocator = context.allocator)
 		defer log.destroy_file_logger(context.logger, allocator = context.allocator)
 	}
+
+	log.debug("pid:", os.get_pid())
 
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -99,16 +108,45 @@ main :: proc() {
 			log.error("Failed to load types from package:", pkg)
 		}
 	}
+	log.debug("shared types:", state.shared_types)
 
 	for flag in state.config.checker_flags {
 		state.checker_flags += { flag, }
 	}
 
-	log.debug("shared types:", state.shared_types)
+	state.libraries = make(map[string]hep.Library, context.allocator)
+	for name, path in state.config.libraries {
+		f, err     := os.open(path)
+		if err != nil {
+			log.error("Failed to open library file:", path, err)
+			continue
+		}
+		info, err2 := os.fstat(f, context.temp_allocator)
+		if err2 != nil {
+			log.error("Failed to open library file:", path, err2)
+			continue
+		}
 
-	arena_err := vmem.arena_init_growing(&state.ast_arena)
-	log.assert(arena_err == nil)
-	defer vmem.arena_destroy(&state.ast_arena)
+		if info.type == .Directory {
+			log.error("Failed to open library file:", path, "directories are not supported yet")
+			continue
+		}
+
+		data: []byte
+		data, err = os.read_entire_file(f, context.allocator)
+		if err != nil {
+			log.error("Failed to read library file:", path, err)
+			continue
+		}
+
+		library, errors := hep.check_library(string(data), path)
+		if len(errors) != 0 {
+			log.error("Failed to compile library file:", path)
+			continue
+		}
+		state.libraries[name] = library
+	}
+	log.debug("libraries:", state.libraries)
 
 	s: bufio.Scanner
 	bufio.scanner_init(&s, io.to_reader(os.to_stream(os.stdin)), buf_allocator = context.allocator)
@@ -212,6 +250,8 @@ notification_did_open_text_document :: proc(state: ^State, contents: []byte) -> 
 	json.unmarshal(contents, &notification, allocator = context.temp_allocator) or_return
 	params := notification.params
 
+	log.infof("textDocument/didOpen(%v)", params.textDocument.uri)
+
 	return check_file(state, notification.params.textDocument.text, params.textDocument.uri)
 }
 
@@ -220,6 +260,8 @@ notification_did_change_text_document :: proc(state: ^State, content: []byte) ->
 	json.unmarshal(content, &notification, allocator = context.temp_allocator) or_return
 	params := notification.params
 
+	log.infof("textDocument/didChange(%v)", params.textDocument.uri)
+
 	return check_file(state, params.contentChanges[0].text, params.textDocument.uri, !state.config.checker_only_saved)
 }
 
@@ -227,6 +269,8 @@ notification_did_save_text_document :: proc(state: ^State, content: []byte) -> (
 	notification: Request(Did_Save_Text_Document_Params)
 	json.unmarshal(content, &notification, allocator = context.temp_allocator) or_return
 	params := notification.params
+
+	log.infof("textDocument/didSave(%v)", params.textDocument.uri)
 
 	text, ok := params.text.?
 	if !ok {
@@ -493,8 +537,12 @@ request_hover :: proc(state: ^State, content: []byte) -> Error {
 	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
 	params := request.params
 
+	log.infof("textDocument/hover(%v)", params.textDocument.uri)
+
+	ast := state.asts[params.textDocument.uri]
+
 	location := position_to_location(params.position)
-	node     := hovered_node_in_block(state.ast, location)
+	node     := hovered_node_in_block(ast.stmts, location)
 
 	response: Response = {
 		id = request.id,
@@ -529,14 +577,34 @@ Location :: struct {
 	range: Range,
 }
 
+@(require_results)
+uri_from_path :: proc(path: string, allocator: runtime.Allocator) -> (uri: Uri, ok: bool) {
+	abs, err := os.get_absolute_path(path, context.temp_allocator)
+	if err != nil {
+		log.error("Failed to get file uri:", path, err)
+		return
+	}
+	return Uri(fmt.aprintf("file://%v", abs, allocator = allocator)), true
+}
+
+@(require_results)
+uri_clone :: proc(uri: Uri, allocator: runtime.Allocator) -> Uri {
+	return Uri(strings.clone(string(uri), allocator))
+}
+
 request_definition :: proc(state: ^State, content: []byte) -> Error {
 	request: Request(Definition_Params)
 	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
 	params := request.params
 
+	log.infof("textDocument/definition(%v)", params.textDocument.uri)
+
+	ast := state.asts[params.textDocument.uri]
+
 	location := position_to_location(params.position)
-	node     := hovered_node_in_block(state.ast, location)
-	node      = node_definition(node)
+	node     := hovered_node_in_block(ast.stmts, location)
+	lib: string
+	lib, node = node_definition(node)
 
 	response: Response = {
 		id = request.id,
@@ -546,8 +614,14 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 		return send_message(response)
 	}
 
+	uri := params.textDocument.uri
+
+	if lib != "" {
+		uri = uri_from_path(lib, context.temp_allocator) or_else params.textDocument.uri
+	}
+
 	response.result = Location {
-		uri   = params.textDocument.uri,
+		uri   = uri,
 		range = {
 			start = location_to_position(node.start),
 			end   = location_to_position(node.end),

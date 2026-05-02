@@ -1,12 +1,20 @@
 package hepls
 
+import "base:intrinsics"
+
+import "core:bufio"
 import "core:bytes"
 import "core:encoding/json"
+import "core:fmt"
+import "core:io"
+import "core:log"
+import "core:os"
 import "core:strconv"
 import "core:strings"
 
 Base_Message :: struct {
 	method: string,
+	error:  Maybe(Response_Error),
 }
 
 decode_message :: proc(data: []byte) -> (
@@ -36,9 +44,61 @@ decode_message :: proc(data: []byte) -> (
 		return
 	}
 
-	method = msg.method
+	if error, has_error := msg.error.?; has_error {
+		log.error(error.code, error.message)
+	}
 
-	ok = len(contents) == content_len
+	method = msg.method
+	ok     = len(contents) == content_len
+	return
+}
+
+send_buffer: strings.Builder
+
+@(require_results)
+send_message :: proc(data: $T) -> (error: Error) where intrinsics.type_has_field(T, "jsonrpc") {
+	data        := data
+	data.jsonrpc = "2.0"
+
+	content := json.marshal(data, allocator = context.temp_allocator) or_return
+	strings.builder_reset(&send_buffer)
+	message := fmt.sbprintf(&send_buffer, "Content-Length: %d\r\n\r\n%s", len(content), content)
+
+	os.write(os.stdout, transmute([]byte)message)
+	return nil
+}
+
+split :: proc(data: []byte, _: bool) -> (
+	advance:     int,
+	token:       []byte,
+	err:         bufio.Scanner_Error,
+	final_token: bool,
+) {
+	data := string(data)
+	header_len := strings.index(data, "\r\n\r\n")
+	if header_len == -1 {
+		return
+	}
+
+	header := data[:header_len]
+	content_len: int
+
+	for line in strings.split_lines_iterator(&header) {
+		l := len("Content-Length: ")
+		if len(line) > l && line[:l] == "Content-Length: " {
+			err         = io.Error.Unknown
+			content_len = strconv.parse_int(line[l:]) or_return
+			err         = nil
+		}
+	}
+
+	if len(data) - header_len - 4 < content_len {
+		return
+	}
+
+	advance = header_len + 4 + content_len
+	token   = transmute([]byte)data[:advance]
+
 	return
 }
 
@@ -46,7 +106,7 @@ Response_Error :: struct {
 	/**
 	 * A number indicating the error type that occurred.
 	 */
-	code:    int,
+	code:    Error_Code,
 
 	/**
 	 * A string providing a short description of the error.
@@ -57,7 +117,7 @@ Response_Error :: struct {
 	 * A primitive or structured value that contains additional
 	 * information about the error. Can be omitted.
 	 */
-	data:    any,
+	// data:    any,
 }
 
 Error_Code :: enum {

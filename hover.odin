@@ -472,20 +472,3 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 		allocator = allocator,
 	)
 }
-
-@(require_results)
-node_definition :: proc(node: ^ast.Node) -> (library: string, definition: ^ast.Node) {
-	#partial switch v in node.derived {
-	case ^ast.Expr_Ident:
-		e := v.entity
-		if e == nil {
-			return "", nil
-		}
-		if e.ident == nil {
-			return e.library, e.decl
-		}
-		return e.library, e.ident
-	}
-
-	return "", nil
-}

@@ -12,7 +12,6 @@ import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:encoding/json"
-import vmem "core:mem/virtual"
 import "core:mem"
 
 import hep "hephaistos"
@@ -20,11 +19,6 @@ import hep "hephaistos"
 Error :: union {
 	json.Unmarshal_Error,
 	json.Marshal_Error,
-}
-
-Ast :: struct {
-	stmts: []^hep.Ast_Stmt,
-	arena: vmem.Arena,
 }
 
 State :: struct {
@@ -229,16 +223,19 @@ split :: proc(data: []byte, _: bool) -> (
 }
 
 requests_map := map[string]proc(state: ^State, contents: []byte) -> (error: Error) {
-	"textDocument/didOpen"    = notification_did_open_text_document,
-	"textDocument/didChange"  = notification_did_change_text_document,
-	"textDocument/didSave"    = notification_did_save_text_document,
-	"textDocument/completion" = request_completion,
-	"textDocument/hover"      = request_hover,
-	"textDocument/definition" = request_definition,
-	"shutdown"                = request_shutdown,
-	"initialize"              = request_initialize,
-	"initialized"             = notification_initialized,
-	"exit"                    = notification_exit,
+	"textDocument/didOpen"           = notification_did_open_text_document,
+	"textDocument/didChange"         = notification_did_change_text_document,
+	"textDocument/didSave"           = notification_did_save_text_document,
+	"textDocument/completion"        = request_completion,
+	"textDocument/hover"             = request_hover,
+	"textDocument/definition"        = request_definition,
+	"textDocument/references"        = request_references,
+	"textDocument/documentHighlight" = request_highlight,
+	"textDocument/rename"            = request_rename,
+	"shutdown"                       = request_shutdown,
+	"initialize"                     = request_initialize,
+	"initialized"                    = notification_initialized,
+	"exit"                           = notification_exit,
 }
 
 notification_initialized :: proc(state: ^State, contents: []byte) -> Error {
@@ -398,9 +395,12 @@ request_initialize :: proc(state: ^State, contents: []byte) -> (error: Error) {
 				version = "0.0.1",
 			},
 			capabilities = {
-				textDocumentSync   = .Full,
-				hoverProvider      = true,
-				definitionProvider = true,
+				textDocumentSync          = .Full,
+				hoverProvider             = true,
+				definitionProvider        = true,
+				referencesProvider        = true,
+				documentHighlightProvider = true,
+				renameProvider            = true,
 			},
 		},
 	}
@@ -420,10 +420,13 @@ Initialize_Result :: struct {
 }
 
 Capabilities :: struct {
-	textDocumentSync:   Text_Document_Sync_Kind,
-	completionProvider: Completion_Options,
-	hoverProvider:      bool,
-	definitionProvider: bool,
+	textDocumentSync:          Text_Document_Sync_Kind,
+	completionProvider:        Completion_Options,
+	hoverProvider:             bool,
+	definitionProvider:        bool,
+	referencesProvider:        bool,
+	documentHighlightProvider: bool,
+	renameProvider:            bool,
 }
 
 Completion_Options :: struct {}
@@ -450,6 +453,8 @@ Response_Result :: union {
 	Hover_Result,
 	Location,
 	[]Location,
+	[]Document_Highlight,
+	Workspace_Edit,
 }
 
 Base_Response :: struct {
@@ -604,7 +609,7 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 	location := position_to_location(params.position)
 	node     := hovered_node_in_block(ast.stmts, location)
 	lib: string
-	lib, node = node_definition(node)
+	lib, node = get_node_definition(node)
 
 	response: Response = {
 		id = request.id,
@@ -645,4 +650,161 @@ position_to_location :: proc(location: Position) -> hep.Location {
 		line   = location.line      + 1,
 		column = location.character + 1,
 	}
+}
+
+Reference_Params :: struct {
+	using _: Text_Document_Position_Params,
+}
+
+request_references :: proc(state: ^State, content: []byte) -> Error {
+	request: Request(Reference_Params)
+	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
+	params := request.params
+
+	log.infof("textDocument/references(%v)", params.textDocument.uri)
+
+	ast := state.asts[params.textDocument.uri]
+
+	location := position_to_location(params.position)
+	node     := hovered_node_in_block(ast.stmts, location)
+	entity   := get_node_entity(node)
+
+	response: Response = {
+		id = request.id,
+	}
+
+	if entity == nil {
+		return send_message(response)
+	}
+
+	locations := make([dynamic]Location, context.temp_allocator)
+
+	iter := ast_iterator_make(ast.stmts)
+	for node in ast_iterator(&iter) {
+		ident := node.derived.(^hep.Ast_Expr_Ident) or_continue
+		if ident.entity == entity {
+			append(&locations, Location {
+				uri   = params.textDocument.uri,
+				range = {
+					start = location_to_position(node.start),
+					end   = location_to_position(node.end),
+				},
+			})
+		}
+	}
+
+	response.result = locations[:]
+
+	return send_message(response)
+}
+
+Highlight_Params :: struct {
+	using _: Text_Document_Position_Params,
+}
+
+Document_Highlight :: struct {
+	range: Range,
+}
+
+request_highlight :: proc(state: ^State, content: []byte) -> Error {
+	request: Request(Reference_Params)
+	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
+	params := request.params
+
+	log.infof("textDocument/documentHighlight(%v)", params.textDocument.uri)
+
+	ast := state.asts[params.textDocument.uri]
+
+	location := position_to_location(params.position)
+	node     := hovered_node_in_block(ast.stmts, location)
+	entity   := get_node_entity(node)
+
+	response: Response = {
+		id = request.id,
+	}
+
+	if entity == nil {
+		return send_message(response)
+	}
+
+	highlights := make([dynamic]Document_Highlight, context.temp_allocator)
+
+	iter := ast_iterator_make(ast.stmts)
+	for node in ast_iterator(&iter) {
+		ident := node.derived.(^hep.Ast_Expr_Ident) or_continue
+		if ident.entity == entity {
+			append(&highlights, Document_Highlight {
+				range = {
+					start = location_to_position(node.start),
+					end   = location_to_position(node.end),
+				},
+			})
+		}
+	}
+
+	response.result = highlights[:]
+
+	return send_message(response)
+}
+
+Rename_Params :: struct {
+	using _: Text_Document_Position_Params,
+	newName: string,
+}
+
+Workspace_Edit :: struct {
+	changes: map[Uri][]Text_Edit
+}
+
+Text_Edit :: struct {
+	range:   Range,
+	newText: string,
+}
+
+request_rename :: proc(state: ^State, content: []byte) -> Error {
+	request: Request(Rename_Params)
+	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
+	params := request.params
+
+	log.infof("textDocument/rename(%v)", params.textDocument.uri)
+
+	ast := state.asts[params.textDocument.uri]
+
+	location := position_to_location(params.position)
+	node     := hovered_node_in_block(ast.stmts, location)
+	entity   := get_node_entity(node)
+
+	response: Response = {
+		id = request.id,
+	}
+
+	if entity == nil {
+		return send_message(response)
+	}
+
+	edits := make([dynamic]Text_Edit, context.temp_allocator)
+
+	iter := ast_iterator_make(ast.stmts)
+	for node in ast_iterator(&iter) {
+		ident := node.derived.(^hep.Ast_Expr_Ident) or_continue
+		if ident.entity == entity {
+			append(&edits, Text_Edit {
+				range = {
+					start = location_to_position(node.start),
+					end   = location_to_position(node.end),
+				},
+				newText = params.newName,
+			})
+		}
+	}
+
+	changes                         := make(map[Uri][]Text_Edit, context.temp_allocator)
+	changes[params.textDocument.uri] = edits[:]
+
+	response.result = Workspace_Edit {
+		changes = changes,
+	}
+
+	log.info(response)
+	return send_message(response)
 }

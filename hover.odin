@@ -239,6 +239,9 @@ hovered_sub_node :: proc(node: ^ast.Node, location: hep.Location) -> ^ast.Node {
 			return hovered_sub_node(v.label, location)
 		}
 	case ^ast.Stmt_For_Range:
+		if location_in_node(v.label, location) {
+			return hovered_sub_node(v.label, location)
+		}
 		if location_in_node(v.start_expr, location) {
 			return hovered_sub_node(v.start_expr, location)
 		}
@@ -252,6 +255,9 @@ hovered_sub_node :: proc(node: ^ast.Node, location: hep.Location) -> ^ast.Node {
 			return n
 		}
 	case ^ast.Stmt_For:
+		if location_in_node(v.label, location) {
+			return hovered_sub_node(v.label, location)
+		}
 		if location_in_node(v.init, location) {
 			return hovered_sub_node(v.init, location)
 		}
@@ -265,10 +271,16 @@ hovered_sub_node :: proc(node: ^ast.Node, location: hep.Location) -> ^ast.Node {
 			return n
 		}
 	case ^ast.Stmt_Block:
+		if location_in_node(v.label, location) {
+			return hovered_sub_node(v.label, location)
+		}
 		if n := hovered_node_in_block(v.body, location); n != nil {
 			return n
 		}
 	case ^ast.Stmt_If:
+		if location_in_node(v.label, location) {
+			return hovered_sub_node(v.label, location)
+		}
 		if location_in_node(v.init, location) {
 			return hovered_sub_node(v.init, location)
 		}
@@ -282,6 +294,9 @@ hovered_sub_node :: proc(node: ^ast.Node, location: hep.Location) -> ^ast.Node {
 			return n
 		}
 	case ^ast.Stmt_Switch:
+		if location_in_node(v.label, location) {
+			return hovered_sub_node(v.label, location)
+		}
 		if location_in_node(v.init, location) {
 			return hovered_sub_node(v.init, location)
 		}

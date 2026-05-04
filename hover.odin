@@ -231,7 +231,13 @@ hovered_sub_node :: proc(node: ^ast.Node, location: hep.Location) -> ^ast.Node {
 			}
 		}
 	case ^ast.Stmt_Break:
+		if location_in_node(v.label, location) {
+			return hovered_sub_node(v.label, location)
+		}
 	case ^ast.Stmt_Continue:
+		if location_in_node(v.label, location) {
+			return hovered_sub_node(v.label, location)
+		}
 	case ^ast.Stmt_For_Range:
 		if location_in_node(v.start_expr, location) {
 			return hovered_sub_node(v.start_expr, location)

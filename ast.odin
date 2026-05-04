@@ -136,7 +136,9 @@ ast_iterator :: proc(iter: ^Ast_Iterator) -> (node: ^hep.Ast_Node, cond: bool) {
 			append(&iter.stack, value)
 		}
 	case ^ast.Stmt_Break:
+		append(&iter.stack, v.label)
 	case ^ast.Stmt_Continue:
+		append(&iter.stack, v.label)
 	case ^ast.Stmt_For_Range:
 		append(&iter.stack, v.start_expr)
 		append(&iter.stack, v.end_expr)
@@ -145,6 +147,7 @@ ast_iterator :: proc(iter: ^Ast_Iterator) -> (node: ^hep.Ast_Node, cond: bool) {
 			append(&iter.stack, node)
 		}
 	case ^ast.Stmt_For:
+		append(&iter.stack, v.label)
 		append(&iter.stack, v.init)
 		append(&iter.stack, v.cond)
 		append(&iter.stack, v.post)
@@ -152,10 +155,12 @@ ast_iterator :: proc(iter: ^Ast_Iterator) -> (node: ^hep.Ast_Node, cond: bool) {
 			append(&iter.stack, node)
 		}
 	case ^ast.Stmt_Block:
+		append(&iter.stack, v.label)
 		for node in v.body {
 			append(&iter.stack, node)
 		}
 	case ^ast.Stmt_If:
+		append(&iter.stack, v.label)
 		append(&iter.stack, v.init)
 		append(&iter.stack, v.cond)
 		for node in v.then_block {
@@ -165,6 +170,7 @@ ast_iterator :: proc(iter: ^Ast_Iterator) -> (node: ^hep.Ast_Node, cond: bool) {
 			append(&iter.stack, node)
 		}
 	case ^ast.Stmt_Switch:
+		append(&iter.stack, v.label)
 		append(&iter.stack, v.init)
 		append(&iter.stack, v.cond)
 		for c in v.cases {

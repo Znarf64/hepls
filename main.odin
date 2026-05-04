@@ -703,7 +703,7 @@ Rename_Params :: struct {
 }
 
 Workspace_Edit :: struct {
-	changes: map[Uri][]Text_Edit
+	changes: map[Uri][]Text_Edit,
 }
 
 Text_Edit :: struct {

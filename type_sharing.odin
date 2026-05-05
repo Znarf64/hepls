@@ -168,7 +168,7 @@ get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.
 				clone_type_strings(v.texel_type, allocator)
 			case ^hep_types.Enum:
 				for &value in v.values {
-					value.name = strings.clone(value.name, context.allocator)
+					value.name = strings.clone(value.name, allocator)
 				}
 				clone_type_strings(v.backing, allocator)
 			case ^hep_types.Bit_Set:

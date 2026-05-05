@@ -53,18 +53,15 @@ decode_message :: proc(data: []byte) -> (
 	return
 }
 
-send_buffer: strings.Builder
-
 @(require_results)
 send_message :: proc(data: $T) -> (error: Error) where intrinsics.type_has_field(T, "jsonrpc") {
 	data        := data
 	data.jsonrpc = "2.0"
 
 	content := json.marshal(data, allocator = context.temp_allocator) or_return
-	strings.builder_reset(&send_buffer)
-	message := fmt.sbprintf(&send_buffer, "Content-Length: %d\r\n\r\n%s", len(content), content)
+	fmt.fprintf(os.stdout, "Content-Length: %d\r\n\r\n", len(content))
+	os.write(os.stdout, content)
 
-	os.write(os.stdout, transmute([]byte)message)
 	return nil
 }
 

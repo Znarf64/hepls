@@ -12,6 +12,7 @@ import "core:os"
 import "core:strings"
 import "core:encoding/json"
 import "core:mem"
+import vmem "core:mem/virtual"
 
 import hep "hephaistos"
 
@@ -23,6 +24,7 @@ Error :: union {
 State :: struct {
 	initialized:  bool,
 	shutdown:     bool,
+	exit:         bool,
 
 	asts:          map[Uri]Ast,
 	shared_types:  map[string]^hep.Type,
@@ -59,10 +61,10 @@ main :: proc() {
 		context.allocator = mem.tracking_allocator(&track)
 
 		defer for _, leak in track.allocation_map {
-			log.infof("%v leaked %m\n", leak.location, leak.size)
+			log.infof("leaked %m", leak.size, location = leak.location)
 		}
 		defer for free in track.bad_free_array {
-			log.errorf("%v was freed badly %m\n", free.location)
+			log.errorf("bad free", location = free.location)
 		}
 	}
 
@@ -74,10 +76,24 @@ main :: proc() {
 		},
 	}
 
+	defer {
+		for uri, &ast in state.asts {
+			delete(string(uri), context.allocator)
+			vmem.arena_destroy(&ast.arena)
+		}
+		defer delete(state.asts)
+	}
+
+	document_arena: vmem.Arena
+	document_err := vmem.arena_init_growing(&document_arena)
+	log.assert(document_err == nil)
+	defer vmem.arena_destroy(&document_arena)
+	document_allocator := vmem.arena_allocator(&document_arena)
+
 	global_config: {
 		global_config_path, _ := os.join_path({ os.dir(os.args[0]), "hepls.json", }, context.temp_allocator)
 		global_config_data    := os.read_entire_file(global_config_path, context.temp_allocator) or_break global_config
-		err                   := json.unmarshal(global_config_data, &state.config)
+		err                   := json.unmarshal(global_config_data, &state.config, allocator = document_allocator)
 		if err != nil {
 			log.error("Failed to load global config:", err)
 		}
@@ -86,7 +102,7 @@ main :: proc() {
 	local_config: {
 		local_config_path := "hepls.json"
 		local_config_data := os.read_entire_file(local_config_path, context.temp_allocator) or_break local_config
-		err               := json.unmarshal(local_config_data, &state.config)
+		err               := json.unmarshal(local_config_data, &state.config, allocator = document_allocator)
 		if err != nil {
 			log.error("Failed to load local config:", err)
 		}
@@ -94,9 +110,9 @@ main :: proc() {
 
 	log.debug("config:", state.config)
 
-	state.shared_types = make(map[string]^hep.Type, context.allocator)
+	state.shared_types = make(map[string]^hep.Type, document_allocator)
 	for pkg in state.config.shared_type_sources {
-		ok := get_package_types(state.config, pkg, &state.shared_types, context.allocator)
+		ok := get_package_types(state.config, pkg, &state.shared_types, document_allocator)
 		if !ok {
 			log.error("Failed to load types from package:", pkg)
 		}
@@ -107,7 +123,7 @@ main :: proc() {
 		state.checker_flags += { flag, }
 	}
 
-	state.libraries = make(map[string]hep.Library, context.allocator)
+	state.libraries = make(map[string]hep.Library, document_allocator)
 	for name, path in state.config.libraries {
 		f, err     := os.open(path)
 		if err != nil {
@@ -126,13 +142,13 @@ main :: proc() {
 		}
 
 		data: []byte
-		data, err = os.read_entire_file(f, context.allocator)
+		data, err = os.read_entire_file(f, document_allocator)
 		if err != nil {
 			log.error("Failed to read library file:", path, err)
 			continue
 		}
 
-		library, errors := hep.check_library(string(data), path)
+		library, errors := hep.check_library(string(data), path, allocator = document_allocator)
 		if len(errors) != 0 {
 			log.error("Failed to compile library file:", path)
 			continue
@@ -146,7 +162,7 @@ main :: proc() {
 	s.split = split
 	defer bufio.scanner_destroy(&s)
 
-	for bufio.scanner_scan(&s) {
+	for !state.exit && bufio.scanner_scan(&s) {
 		text := bufio.scanner_bytes(&s)
 		method, contents, ok := decode_message(text)
 		if !ok {
@@ -156,6 +172,10 @@ main :: proc() {
 		handle_message(&state, method, contents)
 
 		free_all(context.temp_allocator)
+	}
+
+	if !state.shutdown {
+		os.exit(1)
 	}
 }
 
@@ -243,7 +263,8 @@ notification_exit :: proc(state: ^State, content: []byte) -> (error: Error) {
 	notification: Notification(struct{})
 	json.unmarshal(content, &notification, allocator = context.temp_allocator) or_return
 
-	os.exit(state.shutdown ? 0 : 1)
+	state.exit = true
+	return nil
 }
 
 Notification :: struct($Params: typeid) {

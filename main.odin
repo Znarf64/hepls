@@ -471,7 +471,7 @@ Completion_Item_Kind :: enum {
 
 Completion_Item :: struct {
 	label:  string,
-	detail: string,
+	detail: Maybe(string),
 	kind:   Completion_Item_Kind,
 }
 
@@ -567,8 +567,15 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 	case ^hep_ast.Stmt_Break, ^hep_ast.Stmt_Continue:
 		expected_entity_kind = .Label
 	case:
+		seen := make(map[string]struct{}, context.temp_allocator)
+
 		for scope != nil {
 			for name, e in scope.entities {
+				if name in seen {
+					continue
+				}
+				seen[name] = {}
+
 				if expected_entity_kind != nil && e.kind != expected_entity_kind {
 					continue
 				}
@@ -586,6 +593,9 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 				case .Type:
 					item.kind = .TypeParameter
 				case .Var:
+					if location_before(location, e.decl.end) {
+						continue
+					}
 					item.kind = .Variable
 				case .Proc, .Proc_Group:
 					item.kind = .Function
@@ -596,12 +606,18 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 				case .Label:
 					item.kind = .Text
 				}
+
 				append(&items, item)
 			}
 			scope = scope.parent
 		}
 
 		for name in hep_tokenizer.keyword_strings {
+			if name in seen {
+				continue
+			}
+			seen[name] = {}
+
 			append(&items, Completion_Item {
 				label = name,
 				kind  = .Keyword,
@@ -764,6 +780,17 @@ position_to_location :: proc(location: Position) -> hep.Location {
 		line   = location.line      + 1,
 		column = location.character + 1,
 	}
+}
+
+@(require_results)
+location_before :: proc(a, b: hep.Location) -> bool {
+	if a.line < b.line {
+		return true
+	}
+	if a.line == b.line && a.column < b.column {
+		return true
+	}
+	return false
 }
 
 Reference_Params :: struct {

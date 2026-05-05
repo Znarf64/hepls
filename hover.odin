@@ -361,9 +361,6 @@ hovered_sub_node :: proc(node: ^ast.Node, location: hep.Location) -> ^ast.Node {
 			}
 		}
 	case ^ast.Decl_Import:
-		if location_in_node(v.path, location) {
-			return hovered_sub_node(v.path, location)
-		}
 		if location_in_node(v.alias, location) {
 			return hovered_sub_node(v.alias, location)
 		}
@@ -435,7 +432,7 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 	case ^ast.Expr_Ellipsis:
 		type   = v.type
 		value  = v.const_value
-	
+
 	case ^ast.Type_Struct:
 		type = v.type
 	case ^ast.Type_Array:

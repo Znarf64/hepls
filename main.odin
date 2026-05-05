@@ -168,7 +168,7 @@ handle_message :: proc(state: ^State, method: string, contents: []byte) {
 		}
 		return
 	}
-	
+
 	log.error("Invalid method:", method)
 }
 
@@ -556,31 +556,48 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 
 	ast := state.asts[params.textDocument.uri]
 
-	location := position_to_location(params.position)
-	node     := hovered_node_in_block(ast.stmts, location)
-	lib: string
-	lib, node = get_node_definition(node)
+	location  := position_to_location(params.position)
+	root      := hovered_node_in_block(ast.stmts, location)
 
 	response: Response = {
 		id = request.id,
 	}
 
-	if node == nil {
+	if root == nil {
 		return send_message(response)
 	}
 
 	uri := params.textDocument.uri
+	range: Range
 
-	if lib != "" {
-		uri = uri_from_path(lib, context.temp_allocator) or_else params.textDocument.uri
+	if import_decl, ok := root.derived.(^hep.Ast_Decl_Import); ok {
+		ok: bool
+		uri, ok = get_imported_library_uri(state, import_decl, context.temp_allocator)
+		range   = {}
+
+		if !ok {
+			return send_message(response)
+		}
+	} else {
+		lib, node := get_node_definition(root)
+
+		if node == nil {
+			return send_message(response)
+		}
+
+		range = Range {
+			start = location_to_position(node.start),
+			end   = location_to_position(node.end),
+		}
+
+		if lib != "" {
+			uri = uri_from_path(lib, context.temp_allocator) or_else params.textDocument.uri
+		}
 	}
 
 	response.result = Location {
 		uri   = uri,
-		range = {
-			start = location_to_position(node.start),
-			end   = location_to_position(node.end),
-		},
+		range = range,
 	}
 
 	return send_message(response)
@@ -631,8 +648,8 @@ request_references :: proc(state: ^State, content: []byte) -> Error {
 
 	iter := ast_iterator_make(ast.stmts)
 	for node in ast_iterator(&iter) {
-		ident := node.derived.(^hep.Ast_Expr_Ident) or_continue
-		if ident.entity == entity {
+		e := get_node_entity(node)
+		if e == entity {
 			append(&locations, Location {
 				uri   = params.textDocument.uri,
 				range = {
@@ -681,8 +698,8 @@ request_highlight :: proc(state: ^State, content: []byte) -> Error {
 
 	iter := ast_iterator_make(ast.stmts)
 	for node in ast_iterator(&iter) {
-		ident := node.derived.(^hep.Ast_Expr_Ident) or_continue
-		if ident.entity == entity {
+		e := get_node_entity(node)
+		if e == entity {
 			append(&highlights, Document_Highlight {
 				range = {
 					start = location_to_position(node.start),
@@ -736,8 +753,8 @@ request_rename :: proc(state: ^State, content: []byte) -> Error {
 
 	iter := ast_iterator_make(ast.stmts)
 	for node in ast_iterator(&iter) {
-		ident := node.derived.(^hep.Ast_Expr_Ident) or_continue
-		if ident.entity == entity {
+		e := get_node_entity(node)
+		if e == entity {
 			append(&edits, Text_Edit {
 				range = {
 					start = location_to_position(node.start),

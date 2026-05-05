@@ -140,6 +140,7 @@ ast_iterator :: proc(iter: ^Ast_Iterator) -> (node: ^hep.Ast_Node, cond: bool) {
 	case ^ast.Stmt_Continue:
 		append(&iter.stack, v.label)
 	case ^ast.Stmt_For_Range:
+		append(&iter.stack, v.label)
 		append(&iter.stack, v.start_expr)
 		append(&iter.stack, v.end_expr)
 		append(&iter.stack, v.variable)
@@ -244,5 +245,14 @@ get_node_definition :: proc(node: ^ast.Node) -> (library: string, definition: ^a
 	if e.ident == nil {
 		definition = e.decl
 	}
+	return
+}
+
+@(require_results)
+get_imported_library_uri :: proc(state: ^State, decl: ^ast.Decl_Import, allocator := context.allocator) -> (uri: Uri, ok: bool) {
+	path := decl.path.const_value.(string) or_return
+	path  = state.config.libraries[path]   or_return
+	uri   = uri_from_path(path, allocator) or_return
+	ok    = true
 	return
 }

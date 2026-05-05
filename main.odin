@@ -14,7 +14,10 @@ import "core:encoding/json"
 import "core:mem"
 import vmem "core:mem/virtual"
 
-import hep "hephaistos"
+import hep           "hephaistos"
+import hep_ast       "hephaistos/ast"
+import hep_types     "hephaistos/types"
+import hep_tokenizer "hephaistos/tokenizer"
 
 Error :: union {
 	json.Unmarshal_Error,
@@ -362,11 +365,12 @@ request_initialize :: proc(state: ^State, contents: []byte) -> (error: Error) {
 		id     = request.id,
 		result = Initialize_Result {
 			serverInfo  = Server_Info {
-				name    = "hephaistos lsp",
+				name    = "hephaistos language server (hepls)",
 				version = "0.0.1",
 			},
 			capabilities = {
 				textDocumentSync          = .Full,
+				completionProvider        = { triggerCharacters = { ".", }, },
 				hoverProvider             = true,
 				definitionProvider        = true,
 				referencesProvider        = true,
@@ -400,7 +404,9 @@ Capabilities :: struct {
 	renameProvider:            bool,
 }
 
-Completion_Options :: struct {}
+Completion_Options :: struct {
+	triggerCharacters: []string,
+}
 
 Text_Document_Sync_Kind :: enum {
 	None        = 0,
@@ -435,8 +441,38 @@ Base_Response :: struct {
 
 Completion_Result :: []Completion_Item
 
+Completion_Item_Kind :: enum {
+	Text          = 1,
+	Method        = 2,
+	Function      = 3,
+	Constructor   = 4,
+	Field         = 5,
+	Variable      = 6,
+	Class         = 7,
+	Interface     = 8,
+	Module        = 9,
+	Property      = 10,
+	Unit          = 11,
+	Value         = 12,
+	Enum          = 13,
+	Keyword       = 14,
+	Snippet       = 15,
+	Color         = 16,
+	File          = 17,
+	Reference     = 18,
+	Folder        = 19,
+	EnumMember    = 20,
+	Constant      = 21,
+	Struct        = 22,
+	Event         = 23,
+	Operator      = 24,
+	TypeParameter = 25,
+}
+
 Completion_Item :: struct {
-	label: string,
+	label:  string,
+	detail: string,
+	kind:   Completion_Item_Kind,
 }
 
 Completion_Trigger_Kind :: enum {
@@ -460,6 +496,7 @@ Completion_Trigger_Kind :: enum {
 }
 
 Completion_Params :: struct {
+	using _:  Text_Document_Position_Params,
 	context_: struct {
 		triggerKind: Completion_Trigger_Kind,
 	} `json:"context"`,
@@ -469,21 +506,110 @@ Completion_Params :: struct {
 request_completion :: proc(state: ^State, content: []byte) -> Error {
 	request: Request(Completion_Params)
 	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
+	params := request.params
+
+	log.infof("textDocument/completion(%v)", params.textDocument.uri)
+
+	ast := state.asts[params.textDocument.uri]
+
+	location    := position_to_location(params.position)
+	node, scope := get_hovered_node_in_block(ast.stmts, location, true)
 
 	response := Response {
-		id     = request.id,
-		result = Completion_Result {
-			{ "return",  },
-			{ "import",  },
-			{ "for",     },
-			{ "in",      },
-			{ "proc",    },
-			{ "struct",  },
-			{ "enum",    },
-			{ "bit_set", },
-			{ "cast",    },
-		},
+		id = request.id,
 	}
+	if node == nil {
+		return send_message(response)
+	}
+
+	items := make([dynamic]Completion_Item, context.temp_allocator)
+
+	expected_entity_kind: hep_ast.Entity_Kind
+	#partial switch v in node.derived {
+	case ^hep_ast.Expr_Selector:
+		if v.lhs == nil {
+			break
+		}
+
+		type := v.lhs.type
+		if type == nil {
+			break
+		}
+
+		#partial switch type.kind {
+		case .Array:
+			append(&items, Completion_Item { label = "x", kind = .Field, })
+			append(&items, Completion_Item { label = "y", kind = .Field, })
+			append(&items, Completion_Item { label = "z", kind = .Field, })
+			append(&items, Completion_Item { label = "w", kind = .Field, })
+
+			append(&items, Completion_Item { label = "r", kind = .Field, })
+			append(&items, Completion_Item { label = "g", kind = .Field, })
+			append(&items, Completion_Item { label = "b", kind = .Field, })
+			append(&items, Completion_Item { label = "a", kind = .Field, })
+		case .Struct:
+			for member in type.variant.(^hep_types.Struct).fields {
+				append(&items, Completion_Item {
+					label  = member.name,
+					kind   = .Field,
+					detail = hep_types.to_string(member.type, false, context.temp_allocator),
+				})
+			}
+		case .Enum:
+			for member in type.variant.(^hep_types.Enum).values {
+				append(&items, Completion_Item {
+					label  = member.name,
+					kind   = .EnumMember,
+					detail = fmt.tprint(member.value),
+				})
+			}
+		}
+	case ^hep_ast.Stmt_Break, ^hep_ast.Stmt_Continue:
+		expected_entity_kind = .Label
+	case:
+		for scope != nil {
+			for name, e in scope.entities {
+				if expected_entity_kind != nil && e.kind != expected_entity_kind {
+					continue
+				}
+
+				item := Completion_Item {
+					label  = name,
+					detail = entity_detail_string(e, false),
+				}
+
+				switch e.kind {
+				case .Invalid:
+					continue
+				case .Const:
+					item.kind = .Constant
+				case .Type:
+					item.kind = .TypeParameter
+				case .Var:
+					item.kind = .Variable
+				case .Proc, .Proc_Group:
+					item.kind = .Function
+				case .Builtin:
+					item.kind = .Function
+				case .Library:
+					item.kind = .Module
+				case .Label:
+					item.kind = .Text
+				}
+				append(&items, item)
+			}
+			scope = scope.parent
+		}
+
+		for name in hep_tokenizer.keyword_strings {
+			append(&items, Completion_Item {
+				label = name,
+				kind  = .Keyword,
+			})
+		}
+	}
+
+	response.result = items[:]
 	return send_message(response)
 }
 
@@ -518,7 +644,7 @@ request_hover :: proc(state: ^State, content: []byte) -> Error {
 	ast := state.asts[params.textDocument.uri]
 
 	location := position_to_location(params.position)
-	node     := hovered_node_in_block(ast.stmts, location)
+	node, _  := get_hovered_node_in_block(ast.stmts, location)
 
 	response: Response = {
 		id = request.id,
@@ -578,7 +704,7 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 	ast := state.asts[params.textDocument.uri]
 
 	location  := position_to_location(params.position)
-	root      := hovered_node_in_block(ast.stmts, location)
+	root, _   := get_hovered_node_in_block(ast.stmts, location)
 
 	response: Response = {
 		id = request.id,
@@ -654,7 +780,7 @@ request_references :: proc(state: ^State, content: []byte) -> Error {
 	ast := state.asts[params.textDocument.uri]
 
 	location := position_to_location(params.position)
-	node     := hovered_node_in_block(ast.stmts, location)
+	node, _  := get_hovered_node_in_block(ast.stmts, location)
 	entity   := get_node_entity(node)
 
 	response: Response = {
@@ -704,7 +830,7 @@ request_highlight :: proc(state: ^State, content: []byte) -> Error {
 	ast := state.asts[params.textDocument.uri]
 
 	location := position_to_location(params.position)
-	node     := hovered_node_in_block(ast.stmts, location)
+	node, _  := get_hovered_node_in_block(ast.stmts, location)
 	entity   := get_node_entity(node)
 
 	response: Response = {
@@ -759,7 +885,7 @@ request_rename :: proc(state: ^State, content: []byte) -> Error {
 	ast := state.asts[params.textDocument.uri]
 
 	location := position_to_location(params.position)
-	node     := hovered_node_in_block(ast.stmts, location)
+	node, _  := get_hovered_node_in_block(ast.stmts, location)
 	entity   := get_node_entity(node)
 
 	response: Response = {

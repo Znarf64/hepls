@@ -377,7 +377,7 @@ request_initialize :: proc(state: ^State, contents: []byte) -> (error: Error) {
 				documentHighlightProvider = true,
 				renameProvider            = true,
 				signatureHelpProvider     = {
-					triggerCharacters   = { "(", ",", },
+					triggerCharacters   = { "(", ",", "return", },
 					retriggerCharacters = { ",", },
 				},
 			},
@@ -569,7 +569,7 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 	}
 
 	expected_entity_kind: hep_ast.Entity_Kind
-	#partial switch v in ctx.ctx {
+	#partial switch v in ctx.expr {
 	case ^hep_ast.Expr_Selector:
 		if v.lhs == nil {
 			break
@@ -578,7 +578,7 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 		if ident, ok := v.lhs.derived.(^hep_ast.Expr_Ident); ok {
 			if ident.entity != nil && ident.entity.kind == .Library {
 				lib := ast.checker.libraries[ident.entity.library] or_break
-				for name, e in lib.entities {
+				for _, e in lib.entities {
 					item := entity_completion_item(e) or_continue
 					append(&items, item)
 				}
@@ -1008,29 +1008,60 @@ request_signature_help :: proc(state: ^State, content: []byte) -> Error {
 
 	ast := state.asts[params.textDocument.uri]
 
-	location  := position_to_location(params.position)
-	node, ctx := get_hover_context(ast.stmts, location)
+	location := position_to_location(params.position)
+	_, ctx   := get_hover_context(ast.stmts, location)
 
 	response: Response = {
 		id = request.id,
 	}
 
 	text: string
-	#partial switch v in ctx.ctx {
+	args: []hep_types.Field
+
+	#partial switch v in ctx.expr {
 	case ^hep_ast.Expr_Compound:
-		text = node_hover_text(v, context.temp_allocator)
-	case Hover_Context_Call:
-		text = node_hover_text(v.call.lhs, context.temp_allocator)
+		if v.type == nil {
+			break
+		}
+		text         = node_hover_text(v, context.temp_allocator)
+		struct_type := v.type.variant.(^hep_types.Struct) or_break
+		args         = struct_type.fields
+	case ^hep_ast.Expr_Call:
+		if v.lhs == nil || v.lhs.type == nil {
+			break
+		}
+		text       = node_hover_text(v.lhs, context.temp_allocator)
+		proc_type := v.lhs.type.variant.(^hep_types.Proc) or_break
+		args       = proc_type.args
+	case ^hep_ast.Stmt_Return:
+		if ctx.procedure == nil || ctx.procedure.type == nil {
+			break
+		}
+		text       = node_hover_text(ctx.procedure, context.temp_allocator)
+		proc_type := ctx.procedure.type.variant.(^hep_types.Proc) or_break
+		args       = proc_type.returns
 	}
 
 	if text == "" {
 		return send_message(response)
 	}
 
+	signature := Signature_Information {
+		label = text,
+	}
+
+	if len(args) != 0 {
+		signature.parameters = make([]Parameter_Information, len(args))
+		for &param, i in signature.parameters {
+			param = { label = fmt.tprintf("%v: %v", args[i].name, args[i].type), }
+		}
+		if ctx.arg_index < len(args) {
+			signature.activeParameter = ctx.arg_index
+		}
+	}
+
 	response.result = Signature_Help {
-		signatures = {
-			{ label = text, },
-		},
+		signatures = { signature, },
 	}
 
 	return send_message(response)

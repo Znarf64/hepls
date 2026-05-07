@@ -30,18 +30,15 @@ location_in_node :: proc(node: ^ast.Node, location: hep.Location) -> bool {
 	return true
 }
 
-Hover_Context_Call :: struct {
-	call: ^ast.Expr_Call,
-	arg:  int,
-}
-
 Hover_Context :: struct {
 	procedure: ^ast.Expr_Proc_Lit,
 	scope:     ^ast.Scope,
-	ctx:        union {
-		Hover_Context_Call,
+	arg_index:  int, // Index of relevant field for compound, call and return
+	expr:       union {
+		^ast.Expr_Call,
 		^ast.Expr_Compound,
 		^ast.Expr_Selector,
+
 		^ast.Stmt_Return,
 		^ast.Stmt_Break,
 		^ast.Stmt_Continue,
@@ -60,22 +57,20 @@ get_hover_context :: proc(
 		case ^ast.Expr_Proc_Lit:
 			ctx.procedure = v
 		case ^ast.Expr_Compound:
-			ctx.ctx = v
+			ctx.expr = v
 		case ^ast.Stmt_Return:
-			ctx.ctx = v
+			ctx.expr = v
 		case ^ast.Stmt_Break:
-			ctx.ctx = v
+			ctx.expr = v
 		case ^ast.Stmt_Continue:
-			ctx.ctx = v
+			ctx.expr = v
 		case ^ast.Expr_Call:
-			ctx.ctx = Hover_Context_Call {
-				call = v,
-			}
+			ctx.expr = v
 		case ^ast.Expr_Selector:
-			ctx.ctx = v
+			ctx.expr = v
 		}
 
-		if scope, child := hovered_child_node(node, location); child != node {
+		if scope, child := hovered_child_node(node, location, &ctx.arg_index); child != node {
 			if scope != nil {
 				ctx.scope = scope
 			}
@@ -146,9 +141,17 @@ hovered_proc_sig :: proc(sig: ^ast.Expr_Proc_Sig, location: hep.Location) -> ^as
 }
 
 @(require_results)
-hovered_child_node :: proc(node: ^ast.Node, location: hep.Location) -> (^ast.Scope, ^ast.Node) {
+hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -> (^ast.Scope, ^ast.Node) {
 	if !location_in_node(node, location) {
 		return nil, nil
+	}
+
+	@(require_results)
+	value_count :: proc(t: ^types.Type) -> int {
+		if t == nil || t.kind != .Tuple {
+			return 1
+		}
+		return len(t.variant.(^types.Struct).fields)
 	}
 
 	switch v in node.derived {
@@ -193,19 +196,32 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location) -> (^ast.Sco
 		if location_in_node(v.lhs, location) {
 			return nil, v.lhs
 		}
+
+		arg_index: int
+		defer arg^ = arg_index
 		for value in v.args {
 			if f := hovered_field(value, location); f != nil {
 				return nil, f
 			}
+
+			arg_index += value_count(value.value.type)
 		}
 	case ^ast.Expr_Compound:
 		if location_in_node(v.type_expr, location) {
 			return nil, v.type_expr
 		}
+
+		arg_index: int
+		defer arg^ = arg_index
 		for value in v.fields {
 			if f := hovered_field(value, location); f != nil {
+				if value.name != nil {
+					arg_index = value.member_index
+				}
 				return nil, f
 			}
+
+			arg_index += value_count(value.value.type)
 		}
 	case ^ast.Expr_Index:
 		if location_in_node(v.lhs, location) {
@@ -285,10 +301,14 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location) -> (^ast.Sco
 		}
 
 	case ^ast.Stmt_Return:
+		arg_index: int
+		defer arg^ = arg_index
 		for value in v.values {
 			if location_in_node(value, location) {
 				return nil, value
 			}
+
+			arg_index += value_count(value.type)
 		}
 	case ^ast.Stmt_Break:
 		if location_in_node(v.label, location) {

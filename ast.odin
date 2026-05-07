@@ -8,26 +8,26 @@ import hep "hephaistos"
 import ast "hephaistos/ast"
 
 Ast :: struct {
-	stmts: []^hep.Ast_Stmt,
+	stmts: []^ast.Stmt,
 	checker:  hep.Checker,
 	arena:    vmem.Arena,
 }
 
 Ast_Iterator :: struct {
-	stack: [dynamic]^hep.Ast_Node,
+	stack: [dynamic]^ast.Node,
 }
 
 @(require_results)
-ast_iterator_make :: proc(ast: []^hep.Ast_Stmt, allocator: runtime.Allocator) -> (iter: Ast_Iterator) {
-	iter.stack = make([dynamic]^hep.Ast_Node, 0, len(ast), allocator)
-	#reverse for node in ast {
+ast_iterator_make :: proc(stmts: []^hep.Ast_Stmt, allocator: runtime.Allocator) -> (iter: Ast_Iterator) {
+	iter.stack = make([dynamic]^ast.Node, 0, len(stmts), allocator)
+	#reverse for node in stmts {
 		append(&iter.stack, node)
 	}
 	return
 }
 
 @(require_results)
-ast_iterator :: proc(iter: ^Ast_Iterator) -> (node: ^hep.Ast_Node, cond: bool) {
+ast_iterator :: proc(iter: ^Ast_Iterator) -> (node: ^ast.Node, cond: bool) {
 	for node == nil {
 		node = pop_safe(&iter.stack) or_return
 	}

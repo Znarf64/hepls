@@ -763,7 +763,7 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 	uri := params.textDocument.uri
 	range: Range
 
-	if import_decl, ok := root.derived.(^hep.Ast_Decl_Import); ok {
+	if import_decl, ok := root.derived.(^hep_ast.Decl_Import); ok {
 		ok: bool
 		uri, ok = get_imported_library_uri(state, import_decl, context.temp_allocator)
 		range   = {}

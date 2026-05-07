@@ -5,9 +5,9 @@ import "base:runtime"
 import "core:fmt"
 import "core:slice"
 
-import hep "hephaistos"
-import "hephaistos/ast"
-import "hephaistos/types"
+import hep   "hephaistos"
+import ast   "hephaistos/ast"
+import types "hephaistos/types"
 
 @(require_results)
 location_in_node :: proc(node: ^ast.Node, location: hep.Location) -> bool {

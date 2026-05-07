@@ -12,6 +12,10 @@ import hep "hephaistos"
 check_file :: proc(state: ^State, source: string, uri: Uri, show_errors: bool = true) -> (error: Error) {
 	errors, code := check_file_internal(state, uri, source, context.temp_allocator)
 
+	if !show_errors {
+		return nil
+	}
+
 	diagnostics := make([]Diagnostic, len(errors), context.temp_allocator)
 	for &diagnostic, i in diagnostics {
 		error := errors[i]

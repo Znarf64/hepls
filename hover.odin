@@ -1,5 +1,7 @@
 package hepls
 
+import "base:runtime"
+
 import "core:fmt"
 import "core:slice"
 
@@ -28,27 +30,56 @@ location_in_node :: proc(node: ^ast.Node, location: hep.Location) -> bool {
 	return true
 }
 
+Hover_Context_Call :: struct {
+	call: ^ast.Expr_Call,
+	arg:  int,
+}
+
+Hover_Context :: struct {
+	procedure: ^ast.Expr_Proc_Lit,
+	scope:     ^ast.Scope,
+	ctx:        union {
+		Hover_Context_Call,
+		^ast.Expr_Compound,
+		^ast.Expr_Selector,
+		^ast.Stmt_Return,
+		^ast.Stmt_Break,
+		^ast.Stmt_Continue,
+	},
+}
+
 @(require_results)
-get_hovered_node_in_block :: proc(
+get_hover_context :: proc(
 	stmts:    []^ast.Stmt,
 	location: hep.Location,
-	completion := false,
-) -> (node: ^ast.Node, scope: ^ast.Scope) {
+) -> (node: ^ast.Node, ctx: Hover_Context) {
 	node = _hovered_node_in_block(stmts, location)
 
 	for node != nil {
-		if completion {
-			#partial switch _ in node.derived {
-			case ^ast.Stmt_Continue, ^ast.Stmt_Break, ^ast.Expr_Selector:
-				return
+		#partial switch v in node.derived {
+		case ^ast.Expr_Proc_Lit:
+			ctx.procedure = v
+		case ^ast.Expr_Compound:
+			ctx.ctx = v
+		case ^ast.Stmt_Return:
+			ctx.ctx = v
+		case ^ast.Stmt_Break:
+			ctx.ctx = v
+		case ^ast.Stmt_Continue:
+			ctx.ctx = v
+		case ^ast.Expr_Call:
+			ctx.ctx = Hover_Context_Call {
+				call = v,
 			}
+		case ^ast.Expr_Selector:
+			ctx.ctx = v
 		}
 
-		if s, n := hovered_child_node(node, location); n != node {
-			if s != nil {
-				scope = s
+		if scope, child := hovered_child_node(node, location); child != node {
+			if scope != nil {
+				ctx.scope = scope
 			}
-			node = n
+			node = child
 		} else {
 			return
 		}
@@ -416,7 +447,7 @@ entity_detail_string :: proc(entity: ^ast.Entity, pretty: bool) -> string {
 }
 
 @(require_results)
-node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) -> string {
+node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator) -> string {
 	type:   ^types.Type
 	value:   types.Const_Value
 	prefix:  string
@@ -528,11 +559,9 @@ node_hover_text :: proc(node: ^ast.Node, allocator := context.temp_allocator) ->
 	}
 
 	return fmt.aprint(
-		"```odin\n",
 		prefix,
 		type_string,
 		suffix,
-		"\n```",
 		sep       = "",
 		allocator = allocator,
 	)

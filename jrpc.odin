@@ -22,7 +22,8 @@ decode_message :: proc(data: []byte) -> (
 	contents: []byte,
 	ok:       bool,
 ) {
-	header_len := bytes.index(data, []byte{'\r', '\n', '\r', '\n'})
+	rnrn: [4]u8 = "\r\n\r\n"
+	header_len := bytes.index(data, rnrn[:])
 	if header_len == -1 {
 		return
 	}
@@ -37,7 +38,7 @@ decode_message :: proc(data: []byte) -> (
 		}
 	}
 
-	contents = data[header_len + 4:]
+	contents = data[header_len + len(rnrn):]
 
 	msg: Base_Message
 	if err := json.unmarshal(contents, &msg, allocator = context.temp_allocator); err != nil {

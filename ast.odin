@@ -1,5 +1,7 @@
 package hepls
 
+import "base:runtime"
+
 import vmem "core:mem/virtual"
 
 import hep "hephaistos"
@@ -7,7 +9,8 @@ import ast "hephaistos/ast"
 
 Ast :: struct {
 	stmts: []^hep.Ast_Stmt,
-	arena: vmem.Arena,
+	checker:  hep.Checker,
+	arena:    vmem.Arena,
 }
 
 Ast_Iterator :: struct {
@@ -15,7 +18,7 @@ Ast_Iterator :: struct {
 }
 
 @(require_results)
-ast_iterator_make :: proc(ast: []^hep.Ast_Stmt, allocator := context.temp_allocator) -> (iter: Ast_Iterator) {
+ast_iterator_make :: proc(ast: []^hep.Ast_Stmt, allocator: runtime.Allocator) -> (iter: Ast_Iterator) {
 	iter.stack = make([dynamic]^hep.Ast_Node, 0, len(ast), allocator)
 	#reverse for node in ast {
 		append(&iter.stack, node)
@@ -249,7 +252,7 @@ get_node_definition :: proc(node: ^ast.Node) -> (library: string, definition: ^a
 }
 
 @(require_results)
-get_imported_library_uri :: proc(state: ^State, decl: ^ast.Decl_Import, allocator := context.allocator) -> (uri: Uri, ok: bool) {
+get_imported_library_uri :: proc(state: ^State, decl: ^ast.Decl_Import, allocator: runtime.Allocator) -> (uri: Uri, ok: bool) {
 	path := decl.path.const_value.(string) or_return
 	path  = state.config.libraries[path]   or_return
 	uri   = uri_from_path(path, allocator) or_return

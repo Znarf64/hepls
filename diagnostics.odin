@@ -1,5 +1,7 @@
 package hepls
 
+import "base:runtime"
+
 import "core:log"
 import "core:strings"
 import vmem "core:mem/virtual"
@@ -36,7 +38,7 @@ check_file :: proc(state: ^State, source: string, uri: Uri, show_errors: bool = 
 }
 
 @(require_results)
-check_file_internal :: proc(state: ^State, uri: Uri, source: string, error_allocator := context.allocator) -> (errors: []hep.Error, code: string) {
+check_file_internal :: proc(state: ^State, uri: Uri, source: string, error_allocator: runtime.Allocator) -> (errors: []hep.Error, code: string) {
 	ast := &state.asts[uri]
 	if ast == nil {
 		uri            := uri_clone(uri, context.allocator)
@@ -67,8 +69,7 @@ check_file_internal :: proc(state: ^State, uri: Uri, source: string, error_alloc
 		return
 	}
 
-	checker: hep.Checker
-	checker, errors = hep.check_with_types(
+	ast.checker, errors = hep.check_with_types(
 		ast.stmts,
 		defines         = state.config.defines,
 		types           = state.shared_types,

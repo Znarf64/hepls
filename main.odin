@@ -1,7 +1,6 @@
 #+feature dynamic-literals
 package hepls
 
-import "base:intrinsics"
 import "base:runtime"
 
 import "core:bufio"
@@ -205,6 +204,7 @@ requests_map := map[string]proc(state: ^State, contents: []byte) -> (error: Erro
 	"textDocument/references"        = request_references,
 	"textDocument/documentHighlight" = request_highlight,
 	"textDocument/rename"            = request_rename,
+	"textDocument/signatureHelp"     = request_signature_help,
 	"shutdown"                       = request_shutdown,
 	"initialize"                     = request_initialize,
 	"initialized"                    = notification_initialized,
@@ -376,6 +376,10 @@ request_initialize :: proc(state: ^State, contents: []byte) -> (error: Error) {
 				referencesProvider        = true,
 				documentHighlightProvider = true,
 				renameProvider            = true,
+				signatureHelpProvider     = {
+					triggerCharacters   = { "(", ",", },
+					retriggerCharacters = { ",", },
+				},
 			},
 		},
 	}
@@ -394,6 +398,11 @@ Initialize_Result :: struct {
 	serverInfo:   Maybe(Server_Info),
 }
 
+Signature_Help_Options :: struct {
+	triggerCharacters:   []string,
+	retriggerCharacters: []string,
+}
+
 Capabilities :: struct {
 	textDocumentSync:          Text_Document_Sync_Kind,
 	completionProvider:        Completion_Options,
@@ -402,6 +411,7 @@ Capabilities :: struct {
 	referencesProvider:        bool,
 	documentHighlightProvider: bool,
 	renameProvider:            bool,
+	signatureHelpProvider:     Signature_Help_Options,
 }
 
 Completion_Options :: struct {
@@ -432,6 +442,7 @@ Response_Result :: union {
 	[]Location,
 	[]Document_Highlight,
 	Workspace_Edit,
+	Signature_Help,
 }
 
 Base_Response :: struct {
@@ -512,8 +523,8 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 
 	ast := state.asts[params.textDocument.uri]
 
-	location    := position_to_location(params.position)
-	node, scope := get_hovered_node_in_block(ast.stmts, location, true)
+	location  := position_to_location(params.position)
+	node, ctx := get_hover_context(ast.stmts, location)
 
 	response := Response {
 		id = request.id,
@@ -524,11 +535,55 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 
 	items := make([dynamic]Completion_Item, context.temp_allocator)
 
+	@(require_results)
+	entity_completion_item :: proc(entity: ^hep_ast.Entity, location: Maybe(hep.Location) = nil) -> (item: Completion_Item, ok: bool) {
+		item = Completion_Item {
+			label  = entity.name,
+			detail = entity_detail_string(entity, false),
+		}
+
+		switch entity.kind {
+		case .Invalid:
+			return
+		case .Const:
+			item.kind = .Constant
+		case .Type:
+			item.kind = .TypeParameter
+		case .Var:
+			if location, ok := location.?; ok && location_before(location, entity.decl.end) {
+				return
+			}
+			item.kind = .Variable
+		case .Proc, .Proc_Group:
+			item.kind = .Function
+		case .Builtin:
+			item.kind = .Function
+		case .Library:
+			item.kind = .Module
+		case .Label:
+			item.kind = .Text
+		}
+
+		ok = true
+		return
+	}
+
 	expected_entity_kind: hep_ast.Entity_Kind
-	#partial switch v in node.derived {
+	#partial switch v in ctx.ctx {
 	case ^hep_ast.Expr_Selector:
 		if v.lhs == nil {
 			break
+		}
+
+		if ident, ok := v.lhs.derived.(^hep_ast.Expr_Ident); ok {
+			if ident.entity != nil && ident.entity.kind == .Library {
+				lib := ast.checker.libraries[ident.entity.library] or_break
+				for name, e in lib.entities {
+					item := entity_completion_item(e) or_continue
+					append(&items, item)
+				}
+				break
+			}
 		}
 
 		type := v.lhs.type
@@ -569,6 +624,7 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 	case:
 		seen := make(map[string]struct{}, context.temp_allocator)
 
+		scope := ctx.scope
 		for scope != nil {
 			for name, e in scope.entities {
 				if name in seen {
@@ -580,33 +636,7 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 					continue
 				}
 
-				item := Completion_Item {
-					label  = name,
-					detail = entity_detail_string(e, false),
-				}
-
-				switch e.kind {
-				case .Invalid:
-					continue
-				case .Const:
-					item.kind = .Constant
-				case .Type:
-					item.kind = .TypeParameter
-				case .Var:
-					if location_before(location, e.decl.end) {
-						continue
-					}
-					item.kind = .Variable
-				case .Proc, .Proc_Group:
-					item.kind = .Function
-				case .Builtin:
-					item.kind = .Function
-				case .Library:
-					item.kind = .Module
-				case .Label:
-					item.kind = .Text
-				}
-
+				item := entity_completion_item(e) or_continue
 				append(&items, item)
 			}
 			scope = scope.parent
@@ -660,7 +690,7 @@ request_hover :: proc(state: ^State, content: []byte) -> Error {
 	ast := state.asts[params.textDocument.uri]
 
 	location := position_to_location(params.position)
-	node, _  := get_hovered_node_in_block(ast.stmts, location)
+	node, _  := get_hover_context(ast.stmts, location)
 
 	response: Response = {
 		id = request.id,
@@ -679,7 +709,7 @@ request_hover :: proc(state: ^State, content: []byte) -> Error {
 	response.result = Hover_Result {
 		contents = {
 			kind  = "markdown",
-			value = text,
+			value = fmt.tprintf("```odin\n%s\n```", text),
 		},
 	}
 
@@ -720,7 +750,7 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 	ast := state.asts[params.textDocument.uri]
 
 	location  := position_to_location(params.position)
-	root, _   := get_hovered_node_in_block(ast.stmts, location)
+	root, _   := get_hover_context(ast.stmts, location)
 
 	response: Response = {
 		id = request.id,
@@ -807,7 +837,7 @@ request_references :: proc(state: ^State, content: []byte) -> Error {
 	ast := state.asts[params.textDocument.uri]
 
 	location := position_to_location(params.position)
-	node, _  := get_hovered_node_in_block(ast.stmts, location)
+	node, _  := get_hover_context(ast.stmts, location)
 	entity   := get_node_entity(node)
 
 	response: Response = {
@@ -820,7 +850,7 @@ request_references :: proc(state: ^State, content: []byte) -> Error {
 
 	locations := make([dynamic]Location, context.temp_allocator)
 
-	iter := ast_iterator_make(ast.stmts)
+	iter := ast_iterator_make(ast.stmts, context.temp_allocator)
 	for node in ast_iterator(&iter) {
 		e := get_node_entity(node)
 		if e == entity {
@@ -857,7 +887,7 @@ request_highlight :: proc(state: ^State, content: []byte) -> Error {
 	ast := state.asts[params.textDocument.uri]
 
 	location := position_to_location(params.position)
-	node, _  := get_hovered_node_in_block(ast.stmts, location)
+	node, _  := get_hover_context(ast.stmts, location)
 	entity   := get_node_entity(node)
 
 	response: Response = {
@@ -870,7 +900,7 @@ request_highlight :: proc(state: ^State, content: []byte) -> Error {
 
 	highlights := make([dynamic]Document_Highlight, context.temp_allocator)
 
-	iter := ast_iterator_make(ast.stmts)
+	iter := ast_iterator_make(ast.stmts, context.temp_allocator)
 	for node in ast_iterator(&iter) {
 		e := get_node_entity(node)
 		if e == entity {
@@ -912,7 +942,7 @@ request_rename :: proc(state: ^State, content: []byte) -> Error {
 	ast := state.asts[params.textDocument.uri]
 
 	location := position_to_location(params.position)
-	node, _  := get_hovered_node_in_block(ast.stmts, location)
+	node, _  := get_hover_context(ast.stmts, location)
 	entity   := get_node_entity(node)
 
 	response: Response = {
@@ -925,7 +955,7 @@ request_rename :: proc(state: ^State, content: []byte) -> Error {
 
 	edits := make([dynamic]Text_Edit, context.temp_allocator)
 
-	iter := ast_iterator_make(ast.stmts)
+	iter := ast_iterator_make(ast.stmts, context.temp_allocator)
 	for node in ast_iterator(&iter) {
 		e := get_node_entity(node)
 		if e == entity {
@@ -944,6 +974,63 @@ request_rename :: proc(state: ^State, content: []byte) -> Error {
 
 	response.result = Workspace_Edit {
 		changes = changes,
+	}
+
+	return send_message(response)
+}
+
+Signature_Help_Params :: struct {
+	using _: Text_Document_Position_Params,
+}
+
+Signature_Help :: struct {
+	signatures: []Signature_Information,
+}
+
+Signature_Information :: struct {
+	label:           string,
+	documentation:   Maybe(string),
+	parameters:      []Parameter_Information,
+	activeParameter: Maybe(int),
+}
+
+Parameter_Information :: struct {
+	label:         string,
+	documentation: Maybe(string),
+}
+
+request_signature_help :: proc(state: ^State, content: []byte) -> Error {
+	request: Request(Signature_Help_Params)
+	json.unmarshal(content, &request, allocator = context.temp_allocator) or_return
+	params := request.params
+
+	log.infof("textDocument/signatureHelp(%v)", params.textDocument.uri)
+
+	ast := state.asts[params.textDocument.uri]
+
+	location  := position_to_location(params.position)
+	node, ctx := get_hover_context(ast.stmts, location)
+
+	response: Response = {
+		id = request.id,
+	}
+
+	text: string
+	#partial switch v in ctx.ctx {
+	case ^hep_ast.Expr_Compound:
+		text = node_hover_text(v, context.temp_allocator)
+	case Hover_Context_Call:
+		text = node_hover_text(v.call.lhs, context.temp_allocator)
+	}
+
+	if text == "" {
+		return send_message(response)
+	}
+
+	response.result = Signature_Help {
+		signatures = {
+			{ label = text, },
+		},
 	}
 
 	return send_message(response)

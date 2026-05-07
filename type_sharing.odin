@@ -32,7 +32,7 @@ _main :: proc() {{
 `
 
 @(require_results)
-get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.Type, allocator := context.allocator) -> (ok: bool) {
+get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.Type, allocator: runtime.Allocator) -> (ok: bool) {
 	dir_file, err := os.open(path)
 	if err != nil {
 		return
@@ -137,7 +137,7 @@ get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.
 		}
 
 		// the strings point into the shared library which we want to unload since there is no need to keep it around and it could very well be pretty big
-		clone_type_strings :: proc(type: ^hep.Type, allocator := context.allocator) {
+		clone_type_strings :: proc(type: ^hep.Type, allocator: runtime.Allocator) {
 			switch v in type.variant {
 			case ^hep_types.Struct:
 				for &field in v.fields {

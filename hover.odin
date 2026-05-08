@@ -562,6 +562,7 @@ node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator) -> string
 	type_string: string
 	if entity != nil {
 		type_string = entity_detail_string(entity, true)
+		value       = entity.value
 	} else if type != nil {
 		type_string = types.to_string(type, true, context.temp_allocator)
 	} else {

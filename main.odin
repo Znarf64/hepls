@@ -242,11 +242,8 @@ notification_did_save_text_document :: proc(state: ^State, content: []byte) -> (
 
 	log.infof("textDocument/didSave(%v)", params.textDocument.uri)
 
-	text, ok := params.text.?
-	if !ok {
-		return nil
-	}
-
+	ast  := state.asts[params.textDocument.uri]
+	text := params.text.? or_else strings.clone(ast.text, context.temp_allocator) // NOTE: stupid
 	return check_file(state, text, notification.params.textDocument.uri)
 }
 
@@ -562,6 +559,10 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 			item.kind = .Module
 		case .Label:
 			item.kind = .Text
+		case .Struct_Field:
+			item.kind = .Field
+		case .Enum_Value:
+			item.kind = .EnumMember
 		}
 
 		ok = true
@@ -749,8 +750,8 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 
 	ast := state.asts[params.textDocument.uri]
 
-	location  := position_to_location(params.position)
-	root, _   := get_hover_context(ast.stmts, location)
+	location := position_to_location(params.position)
+	root, _  := get_hover_context(ast.stmts, location)
 
 	response: Response = {
 		id = request.id,
@@ -1051,7 +1052,7 @@ request_signature_help :: proc(state: ^State, content: []byte) -> Error {
 	}
 
 	if len(args) != 0 {
-		signature.parameters = make([]Parameter_Information, len(args))
+		signature.parameters = make([]Parameter_Information, len(args), context.temp_allocator)
 		for &param, i in signature.parameters {
 			param = { label = fmt.tprintf("%v: %v", args[i].name, args[i].type), }
 		}

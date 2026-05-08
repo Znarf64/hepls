@@ -9,7 +9,7 @@ import vmem "core:mem/virtual"
 import hep "hephaistos"
 
 @(require_results)
-check_file :: proc(state: ^State, source: string, uri: Uri, show_errors: bool = true) -> (error: Error) {
+check_file :: proc(state: ^State, source: string, uri: Uri, show_errors := true) -> (error: Error) {
 	errors, code := check_file_internal(state, uri, source, context.temp_allocator)
 
 	if !show_errors {
@@ -59,6 +59,7 @@ check_file_internal :: proc(state: ^State, uri: Uri, source: string, error_alloc
 	ast_allocator := vmem.arena_allocator(&ast.arena)
 
 	source := strings.clone(source, ast_allocator)
+	ast.text = source
 
 	tokens: []hep.Token
 	tokens, errors = hep.tokenize(source, false, allocator = ast_allocator, error_allocator = error_allocator)

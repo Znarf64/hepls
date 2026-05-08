@@ -11,6 +11,7 @@ Ast :: struct {
 	stmts: []^ast.Stmt,
 	checker:  hep.Checker,
 	arena:    vmem.Arena,
+	text:     string,
 }
 
 Ast_Iterator :: struct {

@@ -5,9 +5,10 @@ import "base:runtime"
 import "core:fmt"
 import "core:slice"
 
-import hep   "hephaistos"
-import ast   "hephaistos/ast"
-import types "hephaistos/types"
+import hep     "hephaistos"
+import ast     "hephaistos/ast"
+import types   "hephaistos/types"
+import checker "hephaistos/checker"
 
 @(require_results)
 location_in_node :: proc(node: ^ast.Node, location: hep.Location) -> bool {
@@ -31,10 +32,11 @@ location_in_node :: proc(node: ^ast.Node, location: hep.Location) -> bool {
 }
 
 Hover_Context :: struct {
-	procedure: ^ast.Expr_Proc_Lit,
-	scope:     ^ast.Scope,
-	arg_index:  int, // Index of relevant field for compound, call and return
-	expr:       union {
+	procedure:   ^ast.Expr_Proc_Lit,
+	scope:       ^ast.Scope,
+	shader_stage: ast.Shader_Stage,
+	arg_index:    int, // Index of relevant field for compound, call and return
+	expr:         union {
 		^ast.Expr_Call,
 		^ast.Expr_Compound,
 		^ast.Expr_Selector,
@@ -54,6 +56,10 @@ get_hover_context :: proc(
 
 	for node != nil {
 		#partial switch v in node.derived {
+		case ^ast.Decl_Value:
+			if v.shader_stage != nil {
+				ctx.shader_stage = v.shader_stage
+			}
 		case ^ast.Expr_Proc_Lit:
 			ctx.procedure = v
 		case ^ast.Expr_Compound:
@@ -467,11 +473,12 @@ entity_detail_string :: proc(entity: ^ast.Entity, pretty: bool) -> string {
 }
 
 @(require_results)
-node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator) -> string {
+node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator, ctx: Maybe(Hover_Context) = nil) -> string {
 	type:   ^types.Type
 	value:   types.Const_Value
 	prefix:  string
 	entity: ^ast.Entity
+	usage:   checker.Interface_Usage
 
 	switch v in node.derived {
 	case ^ast.Expr_Constant:
@@ -517,6 +524,11 @@ node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator) -> string
 		type   = v.type
 		value  = v.const_value
 	case ^ast.Expr_Interface:
+		shader_stage: ast.Shader_Stage
+		if ctx, ok := ctx.?; ok {
+			shader_stage = ctx.shader_stage
+		}
+		usage  = checker.interface_infos[v.ident.text].usage[shader_stage]
 		prefix = fmt.tprintf("$%s: ", v.ident.text)
 		type   = v.type
 		value  = v.const_value
@@ -576,6 +588,13 @@ node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator) -> string
 			suffix      = fmt.tprintf(` ("%s")`, str)
 		} else {
 			suffix = fmt.tprintf(" (%v)", value)
+		}
+	} else if usage != nil {
+		switch usage {
+		case .In:
+			suffix = " (input)"
+		case .Out:
+			suffix = " (output)"
 		}
 	}
 

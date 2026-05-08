@@ -690,8 +690,8 @@ request_hover :: proc(state: ^State, content: []byte) -> Error {
 
 	ast := state.asts[params.textDocument.uri]
 
-	location := position_to_location(params.position)
-	node, _  := get_hover_context(ast.stmts, location)
+	location  := position_to_location(params.position)
+	node, ctx := get_hover_context(ast.stmts, location)
 
 	response: Response = {
 		id = request.id,
@@ -701,7 +701,7 @@ request_hover :: proc(state: ^State, content: []byte) -> Error {
 		return send_message(response)
 	}
 
-	text := node_hover_text(node, context.temp_allocator)
+	text := node_hover_text(node, context.temp_allocator, ctx)
 
 	if text == "" {
 		return send_message(response)

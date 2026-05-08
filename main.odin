@@ -1016,39 +1016,41 @@ request_signature_help :: proc(state: ^State, content: []byte) -> Error {
 		id = request.id,
 	}
 
-	text: string
-	args: []hep_types.Field
+	signature: Signature_Information
+	args:      []hep_types.Field
 
 	#partial switch v in ctx.expr {
 	case ^hep_ast.Expr_Compound:
 		if v.type == nil {
 			break
 		}
-		text         = node_hover_text(v, context.temp_allocator)
-		struct_type := v.type.variant.(^hep_types.Struct) or_break
-		args         = struct_type.fields
+		signature.label = node_hover_text(v, context.temp_allocator)
+		struct_type    := v.type.variant.(^hep_types.Struct) or_break
+		args            = struct_type.fields
 	case ^hep_ast.Expr_Call:
+		if v.builtin != nil {
+			sig                 := builtin_signatures[v.builtin]
+			signature.label      = sig.text
+			signature.parameters = sig.args
+			log.info(sig.text, signature.parameters)
+		}
 		if v.lhs == nil || v.lhs.type == nil {
 			break
 		}
-		text       = node_hover_text(v.lhs, context.temp_allocator)
-		proc_type := v.lhs.type.variant.(^hep_types.Proc) or_break
-		args       = proc_type.args
+		signature.label = node_hover_text(v.lhs, context.temp_allocator)
+		proc_type      := v.lhs.type.variant.(^hep_types.Proc) or_break
+		args            = proc_type.args
 	case ^hep_ast.Stmt_Return:
 		if ctx.procedure == nil || ctx.procedure.type == nil {
 			break
 		}
-		text       = node_hover_text(ctx.procedure, context.temp_allocator)
-		proc_type := ctx.procedure.type.variant.(^hep_types.Proc) or_break
-		args       = proc_type.returns
+		signature.label = node_hover_text(ctx.procedure, context.temp_allocator)
+		proc_type      := ctx.procedure.type.variant.(^hep_types.Proc) or_break
+		args            = proc_type.returns
 	}
 
-	if text == "" {
+	if signature.label == "" {
 		return send_message(response)
-	}
-
-	signature := Signature_Information {
-		label = text,
 	}
 
 	if len(args) != 0 {
@@ -1056,9 +1058,10 @@ request_signature_help :: proc(state: ^State, content: []byte) -> Error {
 		for &param, i in signature.parameters {
 			param = { label = fmt.tprintf("%v: %v", args[i].name, args[i].type), }
 		}
-		if ctx.arg_index < len(args) {
-			signature.activeParameter = ctx.arg_index
-		}
+	}
+
+	if ctx.arg_index < len(signature.parameters) {
+		signature.activeParameter = ctx.arg_index
 	}
 
 	response.result = Signature_Help {

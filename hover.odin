@@ -456,7 +456,7 @@ entity_detail_string :: proc(entity: ^ast.Entity, pretty: bool) -> string {
 	case .Library:
 		return "library"
 	case .Builtin:
-		return "builtin"
+		return builtin_signatures[entity.builtin_id].text
 	case .Label:
 		return "label"
 	case .Type:

@@ -305,6 +305,13 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 		if location_in_node(v.backing, location) {
 			return nil, v.backing
 		}
+	case ^ast.Type_Opaque:
+		if location_in_node(v.name, location) {
+			return nil, v.name
+		}
+		if location_in_node(v.backing, location) {
+			return nil, v.backing
+		}
 
 	case ^ast.Stmt_Return:
 		arg_index: int
@@ -450,6 +457,14 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 		if location_in_node(v.alias, location) {
 			return nil, v.alias
 		}
+	case ^ast.Decl_Extension:
+		if location_in_node(v.extension, location) {
+			return nil, v.extension
+		}
+		n := _hovered_node_in_block(v.body, location)
+		if n != nil {
+			return nil, n
+		}
 	}
 
 	return nil, node
@@ -554,6 +569,8 @@ node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator, ctx: Mayb
 		type = v.type
 	case ^ast.Type_Bit_Set:
 		type = v.type
+	case ^ast.Type_Opaque:
+		type = v.type
 
 	case ^ast.Stmt_Return:
 	case ^ast.Stmt_Break:
@@ -569,6 +586,7 @@ node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator, ctx: Mayb
 
 	case ^ast.Decl_Value:
 	case ^ast.Decl_Import:
+	case ^ast.Decl_Extension:
 	}
 
 	type_string: string

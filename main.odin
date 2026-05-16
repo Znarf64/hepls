@@ -42,6 +42,8 @@ Config :: struct {
 	defines:             map[string]hep.Const_Value,
 	checker_flags:       []hep.Checker_Flag,
 	libraries:           map[string]string,
+	disable_core:        bool,
+	disable_extensions:  bool,
 }
 
 main :: proc() {
@@ -125,7 +127,74 @@ main :: proc() {
 		state.checker_flags += { flag, }
 	}
 
-	state.libraries = make(map[string]hep.Library, document_allocator)
+	@(require_results)
+	check_core_libraries :: proc(
+		enable_extensions := true,
+		enable_core       := true,
+		allocator         := context.allocator,
+		error_writer: io.Writer = {},
+	) -> (libraries: map[string]hep.Library, ok: bool = true) {
+		error_writer := error_writer if error_writer.procedure != nil else os.to_stream(os.stderr)
+
+		handle_directory :: proc(
+			files:      []runtime.Load_Directory_File,
+			$collection:  string,
+			libraries:   ^map[string]hep.Library,
+			error_writer: io.Writer,
+			allocator:    runtime.Allocator,
+		) -> (ok: bool = true) {
+			for file in files {
+				source   := string(file.data)
+				fullpath := strings.concatenate({ #directory + "/hephaistos/" + collection + "/", file.name, }, allocator)
+				log.info(fullpath)
+				lib, errors := hep.check_library(source, fullpath, allocator = allocator, error_allocator = context.temp_allocator)
+				if len(errors) != 0 {
+					lines := strings.split_lines(source)
+					for error in errors {
+						hep.print_error(error_writer, file.name, lines, error)
+					}
+					ok = false
+				}
+				name, _ := strings.concatenate({ collection + ":", file.name, }, allocator)
+				name     = strings.trim_suffix(name, ".hep")
+				libraries[name] = lib
+			}
+			return
+		}
+
+		core_library_source_files       := #load_directory("hephaistos/core")
+		extensions_library_source_files := #load_directory("hephaistos/extensions")
+
+		libraries = make(map[string]hep.Library, allocator)
+
+		if enable_core {
+			if !handle_directory(core_library_source_files, "core", &libraries, error_writer, allocator) {
+				ok = false
+			}
+		}
+
+		if enable_extensions {
+			if !handle_directory(extensions_library_source_files, "extensions", &libraries, error_writer, allocator) {
+				ok = false
+			}
+		}
+
+		return
+	}
+
+	error_builder := strings.builder_make(context.temp_allocator)
+
+	core_ok: bool
+	state.libraries, core_ok = check_core_libraries(
+		enable_extensions = !state.config.disable_extensions,
+		enable_core       = !state.config.disable_core,
+		allocator         = document_allocator,
+		error_writer      = strings.to_writer(&error_builder),
+	)
+	if !core_ok {
+		log.error("Failed to check core libraries: ", strings.to_string(error_builder))
+	}
+
 	for name, path in state.config.libraries {
 		f, err     := os.open(path)
 		if err != nil {
@@ -157,7 +226,6 @@ main :: proc() {
 		}
 		state.libraries[name] = library
 	}
-	log.debug("libraries:", state.libraries)
 
 	s: bufio.Scanner
 	bufio.scanner_init(&s, io.to_reader(os.to_stream(os.stdin)), buf_allocator = context.allocator)

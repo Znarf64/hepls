@@ -134,6 +134,9 @@ ast_iterator :: proc(iter: ^Ast_Iterator) -> (node: ^ast.Node, cond: bool) {
 	case ^ast.Type_Bit_Set:
 		append(&iter.stack, v.enum_type)
 		append(&iter.stack, v.backing)
+	case ^ast.Type_Opaque:
+		append(&iter.stack, v.name)
+		append(&iter.stack, v.backing)
 
 	case ^ast.Stmt_Return:
 		for value in v.values {
@@ -223,6 +226,11 @@ ast_iterator :: proc(iter: ^Ast_Iterator) -> (node: ^ast.Node, cond: bool) {
 	case ^ast.Decl_Import:
 		append(&iter.stack, v.path)
 		append(&iter.stack, v.alias)
+	case ^ast.Decl_Extension:
+		append(&iter.stack, v.extension)
+		for b in v.body {
+			append(&iter.stack, b)
+		}
 	}
 
 	cond = true

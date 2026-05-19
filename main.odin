@@ -639,55 +639,55 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 
 	expected_entity_kind: hep_ast.Entity_Kind
 	#partial switch v in ctx.expr {
-	case ^hep_ast.Expr_Selector:
-		if v.lhs == nil {
-			break
-		}
+	// case ^hep_ast.Expr_Selector:
+	// 	if v.lhs == nil {
+	// 		break
+	// 	}
 
-		if ident, ok := v.lhs.derived.(^hep_ast.Expr_Ident); ok {
-			if ident.entity != nil && ident.entity.kind == .Library {
-				lib := ast.checker.libraries[ident.entity.library] or_break
-				for _, e in lib.entities {
-					item := entity_completion_item(e) or_continue
-					append(&items, item)
-				}
-				break
-			}
-		}
+	// 	if ident, ok := v.lhs.derived.(^hep_ast.Expr_Ident); ok {
+	// 		if ident.entity != nil && ident.entity.kind == .Library {
+	// 			lib := ast.checker.libraries[ident.entity.library] or_break
+	// 			for _, e in lib.entities {
+	// 				item := entity_completion_item(e) or_continue
+	// 				append(&items, item)
+	// 			}
+	// 			break
+	// 		}
+	// 	}
 
-		type := v.lhs.type
-		if type == nil {
-			break
-		}
+	// 	type := v.lhs.type
+	// 	if type == nil {
+	// 		break
+	// 	}
 
-		#partial switch type.kind {
-		case .Array:
-			append(&items, Completion_Item { label = "x", kind = .Field, })
-			append(&items, Completion_Item { label = "y", kind = .Field, })
-			append(&items, Completion_Item { label = "z", kind = .Field, })
-			append(&items, Completion_Item { label = "w", kind = .Field, })
+	// 	#partial switch type.kind {
+	// 	case .Array:
+	// 		append(&items, Completion_Item { label = "x", kind = .Field, })
+	// 		append(&items, Completion_Item { label = "y", kind = .Field, })
+	// 		append(&items, Completion_Item { label = "z", kind = .Field, })
+	// 		append(&items, Completion_Item { label = "w", kind = .Field, })
 
-			append(&items, Completion_Item { label = "r", kind = .Field, })
-			append(&items, Completion_Item { label = "g", kind = .Field, })
-			append(&items, Completion_Item { label = "b", kind = .Field, })
-			append(&items, Completion_Item { label = "a", kind = .Field, })
-		case .Struct:
-			for member in type.variant.(^hep_types.Struct).fields {
-				append(&items, Completion_Item {
-					label  = member.name,
-					kind   = .Field,
-					detail = hep_types.to_string(member.type, false, context.temp_allocator),
-				})
-			}
-		case .Enum:
-			for member in type.variant.(^hep_types.Enum).values {
-				append(&items, Completion_Item {
-					label  = member.name,
-					kind   = .EnumMember,
-					detail = fmt.tprint(member.value),
-				})
-			}
-		}
+	// 		append(&items, Completion_Item { label = "r", kind = .Field, })
+	// 		append(&items, Completion_Item { label = "g", kind = .Field, })
+	// 		append(&items, Completion_Item { label = "b", kind = .Field, })
+	// 		append(&items, Completion_Item { label = "a", kind = .Field, })
+	// 	case .Struct:
+	// 		for member in type.variant.(^hep_types.Struct).fields {
+	// 			append(&items, Completion_Item {
+	// 				label  = member.name,
+	// 				kind   = .Field,
+	// 				detail = hep_types.to_string(member.type, false, context.temp_allocator),
+	// 			})
+	// 		}
+	// 	case .Enum:
+	// 		for member in type.variant.(^hep_types.Enum).values {
+	// 			append(&items, Completion_Item {
+	// 				label  = member.name,
+	// 				kind   = .EnumMember,
+	// 				detail = fmt.tprint(member.value),
+	// 			})
+	// 		}
+	// 	}
 	case ^hep_ast.Stmt_Break, ^hep_ast.Stmt_Continue:
 		expected_entity_kind = .Label
 	case:
@@ -917,19 +917,15 @@ request_references :: proc(state: ^State, content: []byte) -> Error {
 		return send_message(response)
 	}
 
-	locations := make([dynamic]Location, context.temp_allocator)
+	locations := make([]Location, len(entity.references), context.temp_allocator)
 
-	iter := ast_iterator_make(ast.stmts, context.temp_allocator)
-	for node in ast_iterator(&iter) {
-		e := get_node_entity(node)
-		if e == entity {
-			append(&locations, Location {
-				uri   = params.textDocument.uri,
-				range = {
-					start = location_to_position(node.start),
-					end   = location_to_position(node.end),
-				},
-			})
+	for reference, i in entity.references {
+		locations[i] = {
+			uri   = params.textDocument.uri,
+			range = {
+				start = location_to_position(reference.start),
+				end   = location_to_position(reference.end),
+			},
 		}
 	}
 
@@ -967,18 +963,14 @@ request_highlight :: proc(state: ^State, content: []byte) -> Error {
 		return send_message(response)
 	}
 
-	highlights := make([dynamic]Document_Highlight, context.temp_allocator)
+	highlights := make([]Document_Highlight, len(entity.references), context.temp_allocator)
 
-	iter := ast_iterator_make(ast.stmts, context.temp_allocator)
-	for node in ast_iterator(&iter) {
-		e := get_node_entity(node)
-		if e == entity {
-			append(&highlights, Document_Highlight {
-				range = {
-					start = location_to_position(node.start),
-					end   = location_to_position(node.end),
-				},
-			})
+	for reference, i in entity.references {
+		highlights[i] = {
+			range = {
+				start = location_to_position(reference.start),
+				end   = location_to_position(reference.end),
+			},
 		}
 	}
 
@@ -1022,19 +1014,16 @@ request_rename :: proc(state: ^State, content: []byte) -> Error {
 		return send_message(response)
 	}
 
-	edits := make([dynamic]Text_Edit, context.temp_allocator)
+	edits := make([]Text_Edit, len(entity.references), context.temp_allocator)
 
-	iter := ast_iterator_make(ast.stmts, context.temp_allocator)
-	for node in ast_iterator(&iter) {
-		e := get_node_entity(node)
-		if e == entity {
-			append(&edits, Text_Edit {
-				range = {
-					start = location_to_position(node.start),
-					end   = location_to_position(node.end),
-				},
-				newText = params.newName,
-			})
+	// TODO: handle cross file renames
+	for reference, i in entity.references {
+		edits[i] = {
+			range = {
+				start = location_to_position(reference.start),
+				end   = location_to_position(reference.end),
+			},
+			newText = params.newName,
 		}
 	}
 

@@ -39,7 +39,6 @@ Hover_Context :: struct {
 	expr:         union {
 		^ast.Expr_Call,
 		^ast.Expr_Compound,
-		^ast.Expr_Selector,
 
 		^ast.Stmt_Return,
 		^ast.Stmt_Break,
@@ -71,8 +70,6 @@ get_hover_context :: proc(
 		case ^ast.Stmt_Continue:
 			ctx.expr = v
 		case ^ast.Expr_Call:
-			ctx.expr = v
-		case ^ast.Expr_Selector:
 			ctx.expr = v
 		}
 
@@ -522,7 +519,6 @@ node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator, ctx: Mayb
 	case ^ast.Expr_Selector:
 		type   = v.type
 		value  = v.const_value
-		entity = v.entity
 	case ^ast.Expr_Call:
 		type   = v.type
 		value  = v.const_value

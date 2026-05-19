@@ -79,7 +79,7 @@ check_file_internal :: proc(state: ^State, uri: Uri, source: string, error_alloc
 		defines         = state.config.defines,
 		types           = state.shared_types,
 		libraries       = state.libraries,
-		flags           = state.checker_flags,
+		flags           = state.checker_flags | { .Enable_References, },
 		allocator       = ast_allocator,
 		error_allocator = error_allocator,
 	)

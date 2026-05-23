@@ -19,7 +19,3 @@ language-servers = [ "hepls" ]
 [language-server.hepls]
 command = "hepls"
 ```
-
-## Missing Features
-- Completion
-- Libraries (other than `exntensions` & `base`)

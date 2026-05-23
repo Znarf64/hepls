@@ -582,7 +582,7 @@ node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator, ctx: Mayb
 
 	case ^ast.Decl_Value:
 	case ^ast.Decl_Import:
-		return fmt.aprintf(`"%s"`, v.path.value.(string))
+		return fmt.aprintf(`"%s"`, v.path.value.(string), allocator = allocator)
 
 	case ^ast.Decl_Extension:
 	}

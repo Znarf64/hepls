@@ -160,26 +160,11 @@ main :: proc() {
 				name            = strings.trim_suffix(name, ".hep")
 				libraries[name] = uri
 
-				ast := &state.asts[uri]
-				if ast == nil {
-					uri            := uri_clone(uri, context.allocator)
-					state.asts[uri] = {}
-					ast             = &state.asts[uri]
-
-					ast.file_id = len(state.file_uris)
-					append(&state.file_uris, uri)
-
-					arena_err := vmem.arena_init_growing(&ast.arena)
-					log.assert(arena_err == nil)
-				}
-
-				vmem.arena_free_all(&ast.arena)
-				ast.stmts = {}
-
-				ast_allocator := vmem.arena_allocator(&ast.arena)
-				data, err     := os.read_entire_file_from_path(fullpath, ast_allocator)
-				ast.text       = string(data)
+				data, err := os.read_entire_file_from_path(fullpath, context.temp_allocator)
 				assert(err == nil)
+
+				ast_init(state, uri, string(data))
+
 			}
 			return
 		}
@@ -238,26 +223,7 @@ main :: proc() {
 		uri := uri_from_path(path, context.allocator) or_else log.panic("Failed to resolve library uri")
 		state.libraries[name] = uri
 
-		ast := &state.asts[uri]
-		if ast == nil {
-			uri            := uri_clone(uri, context.allocator)
-			state.asts[uri] = {}
-			ast             = &state.asts[uri]
-
-			ast.file_id = len(state.file_uris)
-			append(&state.file_uris, uri)
-
-			arena_err := vmem.arena_init_growing(&ast.arena)
-			log.assert(arena_err == nil)
-		}
-
-		vmem.arena_free_all(&ast.arena)
-		ast.stmts = {}
-
-		ast_allocator := vmem.arena_allocator(&ast.arena)
-
-		source  := strings.clone(string(data), ast_allocator)
-		ast.text = source
+		ast_init(&state, uri, string(data))
 	}
 
 	s: bufio.Scanner
@@ -438,7 +404,7 @@ Range :: struct {
 }
 
 Position :: struct {
-	line, character: int,
+	line, character: i32,
 }
 
 Base_Request :: struct {
@@ -884,7 +850,7 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 			return send_message(response)
 		}
 	} else {
-		file_id, node := get_node_definition(root)
+		node := get_node_definition(root)
 
 		if node == nil {
 			return send_message(response)
@@ -895,7 +861,7 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 			end   = location_to_position(node.end),
 		}
 
-		uri = state.file_uris[file_id]
+		uri = state.file_uris[node.start.file_id]
 	}
 
 	response.result = Location {
@@ -962,7 +928,7 @@ request_references :: proc(state: ^State, content: []byte) -> Error {
 
 	for reference, i in entity.references {
 		locations[i] = {
-			uri   = params.textDocument.uri,
+			uri   = state.file_uris[reference.start.file_id],
 			range = {
 				start = location_to_position(reference.start),
 				end   = location_to_position(reference.end),
@@ -1006,16 +972,22 @@ request_highlight :: proc(state: ^State, content: []byte) -> Error {
 
 	highlights := make([]Document_Highlight, len(entity.references), context.temp_allocator)
 
-	for reference, i in entity.references {
-		highlights[i] = {
+	n := 0
+	for reference in entity.references {
+		if reference.start.file_id != ast.file_id {
+			continue
+		}
+
+		highlights[n] = {
 			range = {
 				start = location_to_position(reference.start),
 				end   = location_to_position(reference.end),
 			},
 		}
+		n += 1
 	}
 
-	response.result = highlights[:]
+	response.result = highlights[:n]
 
 	return send_message(response)
 }
@@ -1026,7 +998,7 @@ Rename_Params :: struct {
 }
 
 Workspace_Edit :: struct {
-	changes: map[Uri][]Text_Edit,
+	changes: map[Uri][dynamic]Text_Edit,
 }
 
 Text_Edit :: struct {
@@ -1055,21 +1027,22 @@ request_rename :: proc(state: ^State, content: []byte) -> Error {
 		return send_message(response)
 	}
 
-	edits := make([]Text_Edit, len(entity.references), context.temp_allocator)
+	changes := make(map[Uri][dynamic]Text_Edit, context.temp_allocator)
+	for reference in entity.references {
+		uri := state.file_uris[reference.start.file_id]
+		if uri not_in changes {
+			changes[uri] = make([dynamic]Text_Edit, context.temp_allocator)
+		}
+		edits := &changes[uri]
 
-	// TODO: handle cross file renames
-	for reference, i in entity.references {
-		edits[i] = {
+		append(edits, Text_Edit {
 			range = {
 				start = location_to_position(reference.start),
 				end   = location_to_position(reference.end),
 			},
 			newText = params.newName,
-		}
+		})
 	}
-
-	changes                         := make(map[Uri][]Text_Edit, context.temp_allocator)
-	changes[params.textDocument.uri] = edits[:]
 
 	response.result = Workspace_Edit {
 		changes = changes,

@@ -25,8 +25,7 @@ initialize_builtin_signatures :: proc "contextless" () {
 	mem.arena_init(&arena, arena_mem[:])
 	allocator := mem.arena_allocator(&arena)
 
-	base       := #load_directory("hephaistos/base")
-	extensions := #load_directory("hephaistos/extensions")
+	base := #load_directory("hephaistos/base")
 
 	lookup_builtin :: proc(name: string) -> (hep_ast.Builtin_Id, bool) {
 		for n, builtin in hep_checker.builtin_names {
@@ -83,9 +82,6 @@ initialize_builtin_signatures :: proc "contextless" () {
 	}
 
 	for file in base {
-		handle_file(string(file.data), allocator)
-	}
-	for file in extensions {
 		handle_file(string(file.data), allocator)
 	}
 }

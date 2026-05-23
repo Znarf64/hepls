@@ -28,9 +28,10 @@ State :: struct {
 	shutdown:     bool,
 	exit:         bool,
 
+	file_uris:     [dynamic]Uri,
 	asts:          map[Uri]Ast,
 	shared_types:  map[string]^hep.Type,
-	libraries:     map[string]hep.Library,
+	libraries:     map[string]Uri,
 	checker_flags: hep.Checker_Flags,
 	config:        Config,
 }
@@ -85,7 +86,8 @@ main :: proc() {
 			delete(string(uri), context.allocator)
 			vmem.arena_destroy(&ast.arena)
 		}
-		defer delete(state.asts)
+		delete(state.asts)
+		delete(state.file_uris)
 	}
 
 	document_arena: vmem.Arena
@@ -129,54 +131,67 @@ main :: proc() {
 
 	@(require_results)
 	check_core_libraries :: proc(
+		state: ^State,
 		enable_extensions := true,
 		enable_core       := true,
 		allocator         := context.allocator,
 		error_writer: io.Writer = {},
-	) -> (libraries: map[string]hep.Library, ok: bool = true) {
+	) -> (libraries: map[string]Uri, ok: bool = true) {
 		error_writer := error_writer if error_writer.procedure != nil else os.to_stream(os.stderr)
 
 		handle_directory :: proc(
-			files:      []runtime.Load_Directory_File,
+			state:       ^State,
 			$collection:  string,
-			libraries:   ^map[string]hep.Library,
+			libraries:   ^map[string]Uri,
 			error_writer: io.Writer,
 			allocator:    runtime.Allocator,
-		) -> (ok: bool = true) {
+		) {
+			directory_path :: #directory + "/hephaistos/" + collection
+			files, err := os.read_directory_by_path(directory_path, -1, context.temp_allocator)
+			if err != nil {
+				log.error("Failed to read " + collection + " library")
+				return
+			}
 			for file in files {
-				source   := string(file.data)
-				fullpath := strings.concatenate({ #directory + "/hephaistos/" + collection + "/", file.name, }, allocator)
-				log.info(fullpath)
-				lib, errors := hep.check_library(source, fullpath, allocator = allocator, error_allocator = context.temp_allocator)
-				if len(errors) != 0 {
-					lines := strings.split_lines(source)
-					for error in errors {
-						hep.print_error(error_writer, file.name, lines, error)
-					}
-					ok = false
+				fullpath := strings.concatenate({ directory_path + "/", file.name, }, allocator)
+				uri      := uri_from_path(fullpath, allocator) or_else log.panic("Failed to find core library files")
+
+				name, _        := strings.concatenate({ collection + ":", file.name, }, allocator)
+				name            = strings.trim_suffix(name, ".hep")
+				libraries[name] = uri
+
+				ast := &state.asts[uri]
+				if ast == nil {
+					uri            := uri_clone(uri, context.allocator)
+					state.asts[uri] = {}
+					ast             = &state.asts[uri]
+
+					ast.file_id = len(state.file_uris)
+					append(&state.file_uris, uri)
+
+					arena_err := vmem.arena_init_growing(&ast.arena)
+					log.assert(arena_err == nil)
 				}
-				name, _ := strings.concatenate({ collection + ":", file.name, }, allocator)
-				name     = strings.trim_suffix(name, ".hep")
-				libraries[name] = lib
+
+				vmem.arena_free_all(&ast.arena)
+				ast.stmts = {}
+
+				ast_allocator := vmem.arena_allocator(&ast.arena)
+				data, err     := os.read_entire_file_from_path(fullpath, ast_allocator)
+				ast.text       = string(data)
+				assert(err == nil)
 			}
 			return
 		}
 
-		core_library_source_files       := #load_directory("hephaistos/core")
-		extensions_library_source_files := #load_directory("hephaistos/extensions")
-
-		libraries = make(map[string]hep.Library, allocator)
+		libraries = make(map[string]Uri, allocator)
 
 		if enable_core {
-			if !handle_directory(core_library_source_files, "core", &libraries, error_writer, allocator) {
-				ok = false
-			}
+			handle_directory(state, "core", &libraries, error_writer, allocator)
 		}
 
 		if enable_extensions {
-			if !handle_directory(extensions_library_source_files, "extensions", &libraries, error_writer, allocator) {
-				ok = false
-			}
+			handle_directory(state, "extensions", &libraries, error_writer, allocator)
 		}
 
 		return
@@ -186,6 +201,7 @@ main :: proc() {
 
 	core_ok: bool
 	state.libraries, core_ok = check_core_libraries(
+		&state,
 		enable_extensions = !state.config.disable_extensions,
 		enable_core       = !state.config.disable_core,
 		allocator         = document_allocator,
@@ -213,18 +229,35 @@ main :: proc() {
 		}
 
 		data: []byte
-		data, err = os.read_entire_file(f, document_allocator)
+		data, err = os.read_entire_file(f, context.temp_allocator)
 		if err != nil {
 			log.error("Failed to read library file:", path, err)
 			continue
 		}
 
-		library, errors := hep.check_library(string(data), path, allocator = document_allocator)
-		if len(errors) != 0 {
-			log.error("Failed to compile library file:", path)
-			continue
+		uri := uri_from_path(path, context.allocator) or_else log.panic("Failed to resolve library uri")
+		state.libraries[name] = uri
+
+		ast := &state.asts[uri]
+		if ast == nil {
+			uri            := uri_clone(uri, context.allocator)
+			state.asts[uri] = {}
+			ast             = &state.asts[uri]
+
+			ast.file_id = len(state.file_uris)
+			append(&state.file_uris, uri)
+
+			arena_err := vmem.arena_init_growing(&ast.arena)
+			log.assert(arena_err == nil)
 		}
-		state.libraries[name] = library
+
+		vmem.arena_free_all(&ast.arena)
+		ast.stmts = {}
+
+		ast_allocator := vmem.arena_allocator(&ast.arena)
+
+		source  := strings.clone(string(data), ast_allocator)
+		ast.text = source
 	}
 
 	s: bufio.Scanner
@@ -290,7 +323,8 @@ notification_did_open_text_document :: proc(state: ^State, contents: []byte) -> 
 
 	log.infof("textDocument/didOpen(%v)", params.textDocument.uri)
 
-	return check_file(state, notification.params.textDocument.text, params.textDocument.uri)
+	check_file(state, notification.params.textDocument.text, params.textDocument.uri)
+	return nil
 }
 
 notification_did_change_text_document :: proc(state: ^State, content: []byte) -> (error: Error) {
@@ -300,7 +334,8 @@ notification_did_change_text_document :: proc(state: ^State, content: []byte) ->
 
 	log.infof("textDocument/didChange(%v)", params.textDocument.uri)
 
-	return check_file(state, params.contentChanges[0].text, params.textDocument.uri, !state.config.checker_only_saved)
+	check_file(state, params.contentChanges[0].text, params.textDocument.uri, !state.config.checker_only_saved)
+	return nil
 }
 
 notification_did_save_text_document :: proc(state: ^State, content: []byte) -> (error: Error) {
@@ -312,7 +347,8 @@ notification_did_save_text_document :: proc(state: ^State, content: []byte) -> (
 
 	ast  := state.asts[params.textDocument.uri]
 	text := params.text.? or_else strings.clone(ast.text, context.temp_allocator) // NOTE: stupid
-	return check_file(state, text, notification.params.textDocument.uri)
+	check_file(state, text, notification.params.textDocument.uri)
+	return nil
 }
 
 request_shutdown :: proc(state: ^State, content: []byte) -> (error: Error) {
@@ -833,28 +869,33 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 	range: Range
 
 	if import_decl, ok := root.derived.(^hep_ast.Decl_Import); ok {
-		ok: bool
-		uri, ok = get_imported_library_uri(state, import_decl, context.temp_allocator)
-		range   = {}
+		range = {}
+
+		path: string
+		path, ok = import_decl.path.value.(string)
+
+		if !ok {
+			return send_message(response)
+		}
+
+		uri, ok = state.libraries[path]
 
 		if !ok {
 			return send_message(response)
 		}
 	} else {
-		lib, node := get_node_definition(root)
+		file_id, node := get_node_definition(root)
 
 		if node == nil {
 			return send_message(response)
 		}
 
-		range = Range {
+		range = {
 			start = location_to_position(node.start),
 			end   = location_to_position(node.end),
 		}
 
-		if lib != "" {
-			uri = uri_from_path(lib, context.temp_allocator) or_else params.textDocument.uri
-		}
+		uri = state.file_uris[file_id]
 	}
 
 	response.result = Location {

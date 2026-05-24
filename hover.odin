@@ -309,6 +309,10 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 		if location_in_node(v.backing, location) {
 			return nil, v.backing
 		}
+	case ^ast.Type_Distinct:
+		if location_in_node(v.backing, location) {
+			return nil, v.backing
+		}
 
 	case ^ast.Stmt_Return:
 		arg_index: int
@@ -478,7 +482,7 @@ entity_detail_string :: proc(entity: ^ast.Entity, pretty: bool) -> string {
 	case .Label:
 		return "label"
 	case .Type:
-		return "type"
+		return types.to_string(types.base_type(entity.type), pretty, context.temp_allocator)
 	case:
 		return types.to_string(entity.type, pretty, context.temp_allocator)
 	}
@@ -504,6 +508,10 @@ node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator, ctx: Mayb
 		entity = v.entity
 		type   = v.type
 		value  = v.const_value
+
+		if v.entity != nil && v.entity.kind == .Type {
+			prefix = fmt.tprintf("%s :: ", v.text)
+		}
 	case ^ast.Expr_Proc_Lit:
 		type   = v.type
 		value  = v.const_value
@@ -554,18 +562,32 @@ node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator, ctx: Mayb
 		value  = v.const_value
 
 	case ^ast.Type_Struct:
-		type = v.type
+		if v.type.kind == .Named {
+			named := v.type.variant.(^types.Named)
+			prefix = fmt.tprint(named.name, ":: ")
+			type   = named.type
+		} else {
+			type = v.type
+		}
+	case ^ast.Type_Enum:
+		if v.type.kind == .Named {
+			named := v.type.variant.(^types.Named)
+			prefix = fmt.tprint(named.name, ":: ")
+			type   = named.type
+		} else {
+			type = v.type
+		}
 	case ^ast.Type_Array:
 		type = v.type
 	case ^ast.Type_Matrix:
 		type = v.type
 	case ^ast.Type_Image:
 		type = v.type
-	case ^ast.Type_Enum:
-		type = v.type
 	case ^ast.Type_Bit_Set:
 		type = v.type
 	case ^ast.Type_Opaque:
+		type = v.type
+	case ^ast.Type_Distinct:
 		type = v.type
 
 	case ^ast.Stmt_Return:
@@ -590,7 +612,6 @@ node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator, ctx: Mayb
 	type_string: string
 	if entity != nil {
 		type_string = entity_detail_string(entity, true)
-		value       = entity.value
 	} else if type != nil {
 		type_string = types.to_string(type, true, context.temp_allocator)
 	} else {

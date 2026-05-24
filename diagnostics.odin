@@ -54,8 +54,12 @@ check_file :: proc(state: ^State, source: string, uri: Uri, show_errors := true)
 	libraries := make(map[string]hep.Library, ast_allocator)
 
 	for stmt in ast.stmts {
-		v := stmt.derived.(^hep_ast.Decl_Import) or_continue
-		libraries[v.path.value.(string)] = {}
+		v    := stmt.derived.(^hep_ast.Decl_Import) or_continue
+		path := v.path.value.(string)
+		if strings.has_prefix(path, "base:") {
+			continue
+		}
+		libraries[path] = {}
 	}
 
 	for name, &lib in libraries {

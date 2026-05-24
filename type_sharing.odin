@@ -175,9 +175,13 @@ get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.
 				clone_type_strings(v.enum_type, allocator)
 				clone_type_strings(v.backing,   allocator)
 			case ^hep_types.Complex:
-				clone_type_strings(v.array,     allocator)
+				clone_type_strings(v.array, allocator)
 			case ^hep_types.Opaque:
-				clone_type_strings(v.backing,   allocator)
+				v.name = strings.clone(v.name, allocator)
+				clone_type_strings(v.backing,  allocator)
+			case ^hep_types.Named:
+				v.name = strings.clone(v.name, allocator)
+				clone_type_strings(v.type,     allocator)
 			}
 		}
 

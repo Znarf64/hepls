@@ -5,15 +5,14 @@ import "base:runtime"
 import "core:mem"
 import "core:strings"
 
-import hep_ast     "hephaistos/ast"
-import hep_checker "hephaistos/checker"
+import hep "hephaistos"
 
 Builtin_Signature :: struct {
 	text: string,
 	args: []Parameter_Information,
 }
 
-builtin_signatures: [hep_ast.Builtin_Id]Builtin_Signature
+builtin_signatures: [hep.Builtin_Id]Builtin_Signature
 
 @(init)
 initialize_builtin_signatures :: proc "contextless" () {
@@ -27,8 +26,9 @@ initialize_builtin_signatures :: proc "contextless" () {
 
 	base := #load_directory("hephaistos/base")
 
-	lookup_builtin :: proc(name: string) -> (hep_ast.Builtin_Id, bool) {
-		for n, builtin in hep_checker.builtin_names {
+	@(require_results)
+	lookup_builtin :: proc(name: string) -> (hep.Builtin_Id, bool) {
+		for n, builtin in hep.builtin_names {
 			n := n
 
 			if dot := strings.index(n, "."); dot != -1 {

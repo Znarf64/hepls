@@ -8,10 +8,10 @@ import "core:strings"
 import vmem "core:mem/virtual"
 
 import hep "hephaistos"
-import ast "hephaistos/ast"
+// import ast "hephaistos/ast"
 
 Ast :: struct {
-	stmts:    []^ast.Stmt,
+	stmts:    []^hep.Ast_Stmt,
 	checker:     hep.Checker,
 	arena:       vmem.Arena,
 	text:        string,
@@ -20,16 +20,21 @@ Ast :: struct {
 }
 
 @(require_results)
-get_node_entity :: proc(node: ^ast.Node) -> (entity: ^ast.Entity) {
-	#partial switch v in node.derived {
-	case ^ast.Expr_Ident:
-		return v.entity
+get_node_entity :: proc(node: ^hep.Ast_Node) -> (entity: ^hep.Entity) {
+	if node == nil {
+		return
 	}
-	return
+
+	ident, ok := node.derived.(^hep.Expr_Ident)
+	if !ok {
+		return
+	}
+
+	return ident.entity
 }
 
 @(require_results)
-get_node_definition :: proc(node: ^ast.Node) -> (definition: ^ast.Node) {
+get_node_definition :: proc(node: ^hep.Ast_Node) -> (definition: ^hep.Ast_Node) {
 	e := get_node_entity(node)
 	if e == nil {
 		return

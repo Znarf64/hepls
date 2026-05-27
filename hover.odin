@@ -5,13 +5,10 @@ import "base:runtime"
 import "core:fmt"
 import "core:slice"
 
-import hep     "hephaistos"
-import ast     "hephaistos/ast"
-import types   "hephaistos/types"
-import checker "hephaistos/checker"
+import hep "hephaistos"
 
 @(require_results)
-location_in_node :: proc(node: ^ast.Node, location: hep.Location) -> bool {
+location_in_node :: proc(node: ^hep.Ast_Node, location: hep.Location) -> bool {
 	if node == nil {
 		return false
 	}
@@ -32,44 +29,44 @@ location_in_node :: proc(node: ^ast.Node, location: hep.Location) -> bool {
 }
 
 Hover_Context :: struct {
-	procedure:   ^ast.Expr_Proc_Lit,
-	scope:       ^ast.Scope,
-	shader_stage: ast.Shader_Stage,
+	procedure:   ^hep.Expr_Proc_Lit,
+	scope:       ^hep.Scope,
+	shader_stage: hep.Shader_Stage,
 	arg_index:    int, // Index of relevant field for compound, call and return
 	expr:         union {
-		^ast.Expr_Call,
-		^ast.Expr_Compound,
+		^hep.Expr_Call,
+		^hep.Expr_Compound,
 
-		^ast.Stmt_Return,
-		^ast.Stmt_Break,
-		^ast.Stmt_Continue,
+		^hep.Stmt_Return,
+		^hep.Stmt_Break,
+		^hep.Stmt_Continue,
 	},
 }
 
 @(require_results)
 get_hover_context :: proc(
-	stmts:    []^ast.Stmt,
+	stmts:    []^hep.Ast_Stmt,
 	location: hep.Location,
-) -> (node: ^ast.Node, ctx: Hover_Context) {
+) -> (node: ^hep.Ast_Node, ctx: Hover_Context) {
 	node = _hovered_node_in_block(stmts, location)
 
 	for node != nil {
 		#partial switch v in node.derived {
-		case ^ast.Decl_Value:
+		case ^hep.Decl_Value:
 			if v.shader_stage != nil {
 				ctx.shader_stage = v.shader_stage
 			}
-		case ^ast.Expr_Proc_Lit:
+		case ^hep.Expr_Proc_Lit:
 			ctx.procedure = v
-		case ^ast.Expr_Compound:
+		case ^hep.Expr_Compound:
 			ctx.expr = v
-		case ^ast.Stmt_Return:
+		case ^hep.Stmt_Return:
 			ctx.expr = v
-		case ^ast.Stmt_Break:
+		case ^hep.Stmt_Break:
 			ctx.expr = v
-		case ^ast.Stmt_Continue:
+		case ^hep.Stmt_Continue:
 			ctx.expr = v
-		case ^ast.Expr_Call:
+		case ^hep.Expr_Call:
 			ctx.expr = v
 		}
 
@@ -87,8 +84,8 @@ get_hover_context :: proc(
 }
 
 @(require_results)
-_hovered_node_in_block :: proc(stmts: []^ast.Stmt, location: hep.Location) -> ^ast.Node {
-	index, ok := slice.binary_search_by(stmts, location, proc(node: ^ast.Stmt, location: hep.Location) -> slice.Ordering {
+_hovered_node_in_block :: proc(stmts: []^hep.Ast_Stmt, location: hep.Location) -> ^hep.Ast_Node {
+	index, ok := slice.binary_search_by(stmts, location, proc(node: ^hep.Ast_Stmt, location: hep.Location) -> slice.Ordering {
 		if node.start.line > location.line {
 			return .Greater
 		}
@@ -110,7 +107,7 @@ _hovered_node_in_block :: proc(stmts: []^ast.Stmt, location: hep.Location) -> ^a
 }
 
 @(require_results)
-hovered_field :: proc(field: ast.Field, location: hep.Location) -> ^ast.Node {
+hovered_field :: proc(field: hep.Ast_Field, location: hep.Location) -> ^hep.Ast_Node {
 	if location_in_node(field.name, location) {
 		return field.name
 	}
@@ -128,7 +125,7 @@ hovered_field :: proc(field: ast.Field, location: hep.Location) -> ^ast.Node {
 }
 
 @(require_results)
-hovered_proc_sig :: proc(sig: ^ast.Expr_Proc_Sig, location: hep.Location) -> ^ast.Node {
+hovered_proc_sig :: proc(sig: ^hep.Expr_Proc_Sig, location: hep.Location) -> ^hep.Ast_Node {
 	for arg in sig.args {
 		if f := hovered_field(arg, location); f != nil {
 			return f
@@ -144,58 +141,58 @@ hovered_proc_sig :: proc(sig: ^ast.Expr_Proc_Sig, location: hep.Location) -> ^as
 }
 
 @(require_results)
-hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -> (^ast.Scope, ^ast.Node) {
+hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^int) -> (^hep.Scope, ^hep.Ast_Node) {
 	if !location_in_node(node, location) {
 		return nil, nil
 	}
 
 	@(require_results)
-	value_count :: proc(t: ^types.Type) -> int {
+	value_count :: proc(t: ^hep.Type) -> int {
 		if t == nil || t.kind != .Tuple {
 			return 1
 		}
-		return len(t.variant.(^types.Struct).fields)
+		return len(t.variant.(^hep.Type_Struct).fields)
 	}
 
 	switch v in node.derived {
-	case ^ast.Expr_Constant, ^ast.Expr_Ident, ^ast.Expr_Interface, ^ast.Expr_Directive:
+	case ^hep.Expr_Constant, ^hep.Expr_Ident, ^hep.Expr_Interface, ^hep.Expr_Directive:
 		return nil, node
-	case ^ast.Expr_Binary:
+	case ^hep.Expr_Binary:
 		if location_in_node(v.lhs, location) {
 			return nil, v.lhs
 		}
 		if location_in_node(v.rhs, location) {
 			return nil, v.rhs
 		}
-	case ^ast.Expr_Proc_Lit:
+	case ^hep.Expr_Proc_Lit:
 		if h := hovered_proc_sig(v, location); h != nil {
 			return nil, h
 		}
 		if n := _hovered_node_in_block(v.body, location); n != nil {
 			return v.scope, n
 		}
-	case ^ast.Expr_Proc_Sig:
+	case ^hep.Expr_Proc_Sig:
 		if h := hovered_proc_sig(v, location); h != nil {
 			return nil, h
 		}
-	case ^ast.Expr_Proc_Group:
+	case ^hep.Expr_Proc_Group:
 		for m in v.members {
 			if location_in_node(m, location) {
 				return nil, m
 			}
 		}
-	case ^ast.Expr_Paren:
+	case ^hep.Expr_Paren:
 		if location_in_node(v.expr, location) {
 			return nil, v.expr
 		}
-	case ^ast.Expr_Selector:
+	case ^hep.Expr_Selector:
 		if location_in_node(v.lhs, location) {
 			return nil, v.lhs
 		}
 		if location_in_node(v.selector, location) {
 			return nil, v.selector
 		}
-	case ^ast.Expr_Call:
+	case ^hep.Expr_Call:
 		if location_in_node(v.lhs, location) {
 			return nil, v.lhs
 		}
@@ -209,7 +206,7 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 
 			arg_index += value_count(value.value.type)
 		}
-	case ^ast.Expr_Compound:
+	case ^hep.Expr_Compound:
 		if location_in_node(v.type_expr, location) {
 			return nil, v.type_expr
 		}
@@ -226,25 +223,25 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 
 			arg_index += value_count(value.value.type)
 		}
-	case ^ast.Expr_Index:
+	case ^hep.Expr_Index:
 		if location_in_node(v.lhs, location) {
 			return nil, v.lhs
 		}
 		if location_in_node(v.rhs, location) {
 			return nil, v.rhs
 		}
-	case ^ast.Expr_Cast:
+	case ^hep.Expr_Cast:
 		if location_in_node(v.value, location) {
 			return nil, v.value
 		}
 		if location_in_node(v.type_expr, location) {
 			return nil, v.type_expr
 		}
-	case ^ast.Expr_Unary:
+	case ^hep.Expr_Unary:
 		if location_in_node(v.expr, location) {
 			return nil, v.expr
 		}
-	case ^ast.Expr_Ternary:
+	case ^hep.Expr_Ternary:
 		if location_in_node(v.cond, location) {
 			return nil, v.cond
 		}
@@ -254,25 +251,25 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 		if location_in_node(v.else_expr, location) {
 			return nil, v.else_expr
 		}
-	case ^ast.Expr_Ellipsis:
+	case ^hep.Expr_Ellipsis:
 		if location_in_node(v.expr, location) {
 			return nil, v.expr
 		}
 
-	case ^ast.Type_Struct:
+	case ^hep.Expr_Type_Struct:
 		for field in v.fields {
 			if f := hovered_field(field, location); f != nil {
 				return nil, f
 			}
 		}
-	case ^ast.Type_Array:
+	case ^hep.Expr_Type_Array:
 		if location_in_node(v.count, location) {
 			return nil, v.count
 		}
 		if location_in_node(v.elem, location) {
 			return nil, v.elem
 		}
-	case ^ast.Type_Matrix:
+	case ^hep.Expr_Type_Matrix:
 		if location_in_node(v.rows, location) {
 			return nil, v.rows
 		}
@@ -282,39 +279,39 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 		if location_in_node(v.elem, location) {
 			return nil, v.elem
 		}
-	case ^ast.Type_Image:
+	case ^hep.Expr_Type_Image:
 		if location_in_node(v.dimensions, location) {
 			return nil, v.dimensions
 		}
 		if location_in_node(v.texel_type, location) {
 			return nil, v.texel_type
 		}
-	case ^ast.Type_Enum:
+	case ^hep.Expr_Type_Enum:
 		for value in v.values {
 			if f := hovered_field(value, location); f != nil {
 				return nil, f
 			}
 		}
-	case ^ast.Type_Bit_Set:
+	case ^hep.Expr_Type_Bit_Set:
 		if location_in_node(v.enum_type, location) {
 			return nil, v.enum_type
 		}
 		if location_in_node(v.backing, location) {
 			return nil, v.backing
 		}
-	case ^ast.Type_Opaque:
+	case ^hep.Expr_Type_Opaque:
 		if location_in_node(v.name, location) {
 			return nil, v.name
 		}
 		if location_in_node(v.backing, location) {
 			return nil, v.backing
 		}
-	case ^ast.Type_Distinct:
+	case ^hep.Expr_Type_Distinct:
 		if location_in_node(v.backing, location) {
 			return nil, v.backing
 		}
 
-	case ^ast.Stmt_Return:
+	case ^hep.Stmt_Return:
 		arg_index: int
 		defer arg^ = arg_index
 		for value in v.values {
@@ -324,15 +321,15 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 
 			arg_index += value_count(value.type)
 		}
-	case ^ast.Stmt_Break:
+	case ^hep.Stmt_Break:
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
-	case ^ast.Stmt_Continue:
+	case ^hep.Stmt_Continue:
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
-	case ^ast.Stmt_For_Range:
+	case ^hep.Stmt_For_Range:
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
@@ -348,7 +345,7 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 		if n := _hovered_node_in_block(v.body, location); n != nil {
 			return v.scope, n
 		}
-	case ^ast.Stmt_For:
+	case ^hep.Stmt_For:
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
@@ -364,14 +361,14 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 		if n := _hovered_node_in_block(v.body, location); n != nil {
 			return v.scope, n
 		}
-	case ^ast.Stmt_Block:
+	case ^hep.Stmt_Block:
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
 		if n := _hovered_node_in_block(v.body, location); n != nil {
 			return v.scope, n
 		}
-	case ^ast.Stmt_If:
+	case ^hep.Stmt_If:
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
@@ -387,7 +384,7 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 		if n := _hovered_node_in_block(v.else_block, location); n != nil {
 			return v.else_scope, n
 		}
-	case ^ast.Stmt_Switch:
+	case ^hep.Stmt_Switch:
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
@@ -405,7 +402,7 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 				return c.scope, n
 			}
 		}
-	case ^ast.Stmt_Assign:
+	case ^hep.Stmt_Assign:
 		for l in v.lhs {
 			if location_in_node(l, location) {
 				return nil, l
@@ -417,9 +414,9 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 				return nil, r
 			}
 		}
-	case ^ast.Stmt_Expr:
+	case ^hep.Stmt_Expr:
 		return nil, v.expr
-	case ^ast.Stmt_When:
+	case ^hep.Stmt_When:
 		if location_in_node(v.cond, location) {
 			return nil, v.cond
 		}
@@ -432,7 +429,7 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 			return nil, n
 		}
 
-	case ^ast.Decl_Value:
+	case ^hep.Decl_Value:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
 				return nil, f
@@ -454,11 +451,11 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 				return nil, v
 			}
 		}
-	case ^ast.Decl_Import:
+	case ^hep.Decl_Import:
 		if location_in_node(v.alias, location) {
 			return nil, v.alias
 		}
-	case ^ast.Decl_Extension:
+	case ^hep.Decl_Extension:
 		if location_in_node(v.extension, location) {
 			return nil, v.extension
 		}
@@ -473,7 +470,7 @@ hovered_child_node :: proc(node: ^ast.Node, location: hep.Location, arg: ^int) -
 
 // may allocate using context.temp_allocator
 @(require_results)
-entity_detail_string :: proc(entity: ^ast.Entity, pretty: bool) -> string {
+entity_detail_string :: proc(entity: ^hep.Entity, pretty: bool) -> string {
 	#partial switch entity.kind {
 	case .Library:
 		return "library"
@@ -482,28 +479,28 @@ entity_detail_string :: proc(entity: ^ast.Entity, pretty: bool) -> string {
 	case .Label:
 		return "label"
 	case .Type:
-		return types.to_string(types.base_type(entity.type), pretty, context.temp_allocator)
+		return hep.type_to_string(hep.base_type(entity.type), pretty, context.temp_allocator)
 	case:
-		return types.to_string(entity.type, pretty, context.temp_allocator)
+		return hep.type_to_string(entity.type, pretty, context.temp_allocator)
 	}
 }
 
 @(require_results)
-node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator, ctx: Maybe(Hover_Context) = nil) -> string {
-	type:   ^types.Type
-	value:   types.Const_Value
+node_hover_text :: proc(node: ^hep.Ast_Node, allocator: runtime.Allocator, ctx: Maybe(Hover_Context) = nil) -> string {
+	type:   ^hep.Type
+	value:   hep.Const_Value
 	prefix:  string
-	entity: ^ast.Entity
-	usage:   checker.Interface_Usage
+	entity: ^hep.Entity
+	usage:   hep.Interface_Usage
 
 	switch v in node.derived {
-	case ^ast.Expr_Constant:
+	case ^hep.Expr_Constant:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Binary:
+	case ^hep.Expr_Binary:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Ident:
+	case ^hep.Expr_Ident:
 		prefix = fmt.tprintf("%s: ", v.text)
 		entity = v.entity
 		type   = v.type
@@ -512,108 +509,108 @@ node_hover_text :: proc(node: ^ast.Node, allocator: runtime.Allocator, ctx: Mayb
 		if v.entity != nil && v.entity.kind == .Type {
 			prefix = fmt.tprintf("%s :: ", v.text)
 		}
-	case ^ast.Expr_Proc_Lit:
+	case ^hep.Expr_Proc_Lit:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Proc_Sig:
+	case ^hep.Expr_Proc_Sig:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Proc_Group:
+	case ^hep.Expr_Proc_Group:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Paren:
+	case ^hep.Expr_Paren:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Selector:
+	case ^hep.Expr_Selector:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Call:
+	case ^hep.Expr_Call:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Compound:
+	case ^hep.Expr_Compound:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Index:
+	case ^hep.Expr_Index:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Cast:
+	case ^hep.Expr_Cast:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Unary:
+	case ^hep.Expr_Unary:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Interface:
-		shader_stage: ast.Shader_Stage
+	case ^hep.Expr_Interface:
+		shader_stage: hep.Shader_Stage
 		if ctx, ok := ctx.?; ok {
 			shader_stage = ctx.shader_stage
 		}
-		usage  = checker.interface_infos[v.ident.text].usage[shader_stage]
+		usage  = hep.interface_infos[v.ident.text].usage[shader_stage]
 		prefix = fmt.tprintf("$%s: ", v.ident.text)
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Directive:
+	case ^hep.Expr_Directive:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Ternary:
+	case ^hep.Expr_Ternary:
 		type   = v.type
 		value  = v.const_value
-	case ^ast.Expr_Ellipsis:
+	case ^hep.Expr_Ellipsis:
 		type   = v.type
 		value  = v.const_value
 
-	case ^ast.Type_Struct:
+	case ^hep.Expr_Type_Struct:
 		if v.type.kind == .Named {
-			named := v.type.variant.(^types.Named)
+			named := v.type.variant.(^hep.Type_Named)
 			prefix = fmt.tprint(named.name, ":: ")
 			type   = named.type
 		} else {
 			type = v.type
 		}
-	case ^ast.Type_Enum:
+	case ^hep.Expr_Type_Enum:
 		if v.type.kind == .Named {
-			named := v.type.variant.(^types.Named)
+			named := v.type.variant.(^hep.Type_Named)
 			prefix = fmt.tprint(named.name, ":: ")
 			type   = named.type
 		} else {
 			type = v.type
 		}
-	case ^ast.Type_Array:
+	case ^hep.Expr_Type_Array:
 		type = v.type
-	case ^ast.Type_Matrix:
+	case ^hep.Expr_Type_Matrix:
 		type = v.type
-	case ^ast.Type_Image:
+	case ^hep.Expr_Type_Image:
 		type = v.type
-	case ^ast.Type_Bit_Set:
+	case ^hep.Expr_Type_Bit_Set:
 		type = v.type
-	case ^ast.Type_Opaque:
+	case ^hep.Expr_Type_Opaque:
 		type = v.type
-	case ^ast.Type_Distinct:
+	case ^hep.Expr_Type_Distinct:
 		type = v.type
 
-	case ^ast.Stmt_Return:
-	case ^ast.Stmt_Break:
-	case ^ast.Stmt_Continue:
-	case ^ast.Stmt_For_Range:
-	case ^ast.Stmt_For:
-	case ^ast.Stmt_Block:
-	case ^ast.Stmt_If:
-	case ^ast.Stmt_Switch:
-	case ^ast.Stmt_Assign:
-	case ^ast.Stmt_Expr:
-	case ^ast.Stmt_When:
+	case ^hep.Stmt_Return:
+	case ^hep.Stmt_Break:
+	case ^hep.Stmt_Continue:
+	case ^hep.Stmt_For_Range:
+	case ^hep.Stmt_For:
+	case ^hep.Stmt_Block:
+	case ^hep.Stmt_If:
+	case ^hep.Stmt_Switch:
+	case ^hep.Stmt_Assign:
+	case ^hep.Stmt_Expr:
+	case ^hep.Stmt_When:
 
-	case ^ast.Decl_Value:
-	case ^ast.Decl_Import:
+	case ^hep.Decl_Value:
+	case ^hep.Decl_Import:
 		return fmt.aprintf(`"%s"`, v.path.value.(string), allocator = allocator)
 
-	case ^ast.Decl_Extension:
+	case ^hep.Decl_Extension:
 	}
 
 	type_string: string
 	if entity != nil {
 		type_string = entity_detail_string(entity, true)
 	} else if type != nil {
-		type_string = types.to_string(type, true, context.temp_allocator)
+		type_string = hep.type_to_string(type, true, context.temp_allocator)
 	} else {
 		return ""
 	}

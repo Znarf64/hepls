@@ -5,8 +5,7 @@ import "base:runtime"
 import "core:strings"
 import vmem "core:mem/virtual"
 
-import hep     "hephaistos"
-import hep_ast "hephaistos/ast"
+import hep "hephaistos"
 
 check_file :: proc(state: ^State, source: string, uri: Uri, show_errors := true) {
 	ast           := ast_init(state, uri, source)
@@ -54,7 +53,7 @@ check_file :: proc(state: ^State, source: string, uri: Uri, show_errors := true)
 	libraries := make(map[string]hep.Library, ast_allocator)
 
 	for stmt in ast.stmts {
-		v    := stmt.derived.(^hep_ast.Decl_Import) or_continue
+		v    := stmt.derived.(^hep.Decl_Import) or_continue
 		path := v.path.value.(string)
 		if strings.has_prefix(path, "base:") {
 			continue

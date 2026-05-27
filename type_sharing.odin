@@ -9,8 +9,7 @@ import "core:os"
 import "core:strings"
 import "core:unicode"
 
-import hep       "hephaistos"
-import hep_types "hephaistos/types"
+import hep "hephaistos"
 
 CONTENT :: `// This is an auto generated file to fetch types from a package. Why are you reading this?
 package hepls_tmp
@@ -139,18 +138,18 @@ get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.
 		// the strings point into the shared library which we want to unload since there is no need to keep it around and it could very well be pretty big
 		clone_type_strings :: proc(type: ^hep.Type, allocator: runtime.Allocator) {
 			switch v in type.variant {
-			case ^hep_types.Struct:
+			case ^hep.Type_Struct:
 				for &field in v.fields {
 					field.name = strings.clone(field.name, allocator)
 					clone_type_strings(field.type, allocator)
 				}
-			case ^hep_types.Matrix:
+			case ^hep.Type_Matrix:
 				clone_type_strings(v.col_type, allocator)
-			case ^hep_types.Array:
+			case ^hep.Type_Array:
 				clone_type_strings(v.elem, allocator)
-			case ^hep_types.Buffer:
+			case ^hep.Type_Buffer:
 				clone_type_strings(v.elem, allocator)
-			case ^hep_types.Proc:
+			case ^hep.Type_Proc:
 				for &arg in v.args {
 					arg.name = strings.clone(arg.name, allocator)
 					clone_type_strings(arg.type, allocator)
@@ -160,26 +159,26 @@ get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.
 					clone_type_strings(ret.type, allocator)
 				}
 				clone_type_strings(v.return_type, allocator)
-			case ^hep_types.Proc_Group:
+			case ^hep.Type_Proc_Group:
 				for m in v.members {
 					clone_type_strings(m, allocator)
 				}
-			case ^hep_types.Image:
+			case ^hep.Type_Image:
 				clone_type_strings(v.texel_type, allocator)
-			case ^hep_types.Enum:
+			case ^hep.Type_Enum:
 				for &value in v.values {
 					value.name = strings.clone(value.name, allocator)
 				}
 				clone_type_strings(v.backing, allocator)
-			case ^hep_types.Bit_Set:
+			case ^hep.Type_Bit_Set:
 				clone_type_strings(v.enum_type, allocator)
 				clone_type_strings(v.backing,   allocator)
-			case ^hep_types.Complex:
+			case ^hep.Type_Complex:
 				clone_type_strings(v.array, allocator)
-			case ^hep_types.Opaque:
+			case ^hep.Type_Opaque:
 				v.name = strings.clone(v.name, allocator)
 				clone_type_strings(v.backing,  allocator)
-			case ^hep_types.Named:
+			case ^hep.Type_Named:
 				v.name = strings.clone(v.name, allocator)
 				clone_type_strings(v.type,     allocator)
 			}

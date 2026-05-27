@@ -13,10 +13,7 @@ import "core:encoding/json"
 import "core:mem"
 import vmem "core:mem/virtual"
 
-import hep           "hephaistos"
-import hep_ast       "hephaistos/ast"
-import hep_types     "hephaistos/types"
-import hep_tokenizer "hephaistos/tokenizer"
+import hep "hephaistos"
 
 Error :: union {
 	json.Unmarshal_Error,
@@ -603,7 +600,7 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 	items := make([dynamic]Completion_Item, context.temp_allocator)
 
 	@(require_results)
-	entity_completion_item :: proc(entity: ^hep_ast.Entity, location: Maybe(hep.Location) = nil) -> (item: Completion_Item, ok: bool) {
+	entity_completion_item :: proc(entity: ^hep.Entity, location: Maybe(hep.Location) = nil) -> (item: Completion_Item, ok: bool) {
 		item = Completion_Item {
 			label  = entity.name,
 			detail = entity_detail_string(entity, false),
@@ -620,6 +617,8 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 			if location, ok := location.?; ok && location_before(location, entity.decl.end) {
 				return
 			}
+			item.kind = .Variable
+		case .Proc_Param, .Proc_Return:
 			item.kind = .Variable
 		case .Proc, .Proc_Group:
 			item.kind = .Function
@@ -639,7 +638,7 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 		return
 	}
 
-	expected_entity_kind: hep_ast.Entity_Kind
+	expected_entity_kind: hep.Entity_Kind
 	#partial switch v in ctx.expr {
 	// case ^hep_ast.Expr_Selector:
 	// 	if v.lhs == nil {
@@ -690,7 +689,7 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 	// 			})
 	// 		}
 	// 	}
-	case ^hep_ast.Stmt_Break, ^hep_ast.Stmt_Continue:
+	case ^hep.Stmt_Break, ^hep.Stmt_Continue:
 		expected_entity_kind = .Label
 	case:
 		seen := make(map[string]struct{}, context.temp_allocator)
@@ -713,7 +712,7 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 			scope = scope.parent
 		}
 
-		for name in hep_tokenizer.keyword_strings {
+		for name in hep.keyword_strings {
 			if name in seen {
 				continue
 			}
@@ -834,7 +833,7 @@ request_definition :: proc(state: ^State, content: []byte) -> Error {
 	uri := params.textDocument.uri
 	range: Range
 
-	if import_decl, ok := root.derived.(^hep_ast.Decl_Import); ok {
+	if import_decl, ok := root.derived.(^hep.Decl_Import); ok {
 		range = {}
 
 		path: string
@@ -1088,17 +1087,17 @@ request_signature_help :: proc(state: ^State, content: []byte) -> Error {
 	}
 
 	signature: Signature_Information
-	args:      []hep_types.Field
+	args:      []^hep.Entity
 
 	#partial switch v in ctx.expr {
-	case ^hep_ast.Expr_Compound:
+	case ^hep.Expr_Compound:
 		if v.type == nil {
 			break
 		}
 		signature.label = node_hover_text(v, context.temp_allocator)
-		struct_type    := v.type.variant.(^hep_types.Struct) or_break
+		struct_type    := v.type.variant.(^hep.Type_Struct) or_break
 		args            = struct_type.fields
-	case ^hep_ast.Expr_Call:
+	case ^hep.Expr_Call:
 		if v.builtin != nil {
 			sig                 := builtin_signatures[v.builtin]
 			signature.label      = sig.text
@@ -1109,14 +1108,14 @@ request_signature_help :: proc(state: ^State, content: []byte) -> Error {
 			break
 		}
 		signature.label = node_hover_text(v.lhs, context.temp_allocator)
-		proc_type      := v.lhs.type.variant.(^hep_types.Proc) or_break
+		proc_type      := v.lhs.type.variant.(^hep.Type_Proc) or_break
 		args            = proc_type.args
-	case ^hep_ast.Stmt_Return:
+	case ^hep.Stmt_Return:
 		if ctx.procedure == nil || ctx.procedure.type == nil {
 			break
 		}
 		signature.label = node_hover_text(ctx.procedure, context.temp_allocator)
-		proc_type      := ctx.procedure.type.variant.(^hep_types.Proc) or_break
+		proc_type      := ctx.procedure.type.variant.(^hep.Type_Proc) or_break
 		args            = proc_type.returns
 	}
 

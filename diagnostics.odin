@@ -58,10 +58,7 @@ check_file :: proc(state: ^State, source: string, uri: Uri, show_errors := true)
 		if strings.has_prefix(path, "base:") {
 			continue
 		}
-		libraries[path] = {}
-	}
 
-	for name, &lib in libraries {
 		@(require_results)
 		check_library :: proc(
 			source:    string,
@@ -99,13 +96,13 @@ check_file :: proc(state: ^State, source: string, uri: Uri, show_errors := true)
 			return
 		}
 
-		lib_uri := state.libraries[name]
+		lib_uri := state.libraries[path] or_continue
 		lib_ast := state.asts[lib_uri]
 		source  := strings.clone(lib_ast.text, ast_allocator)
-		code: string
-		lib, errors, code = check_library(
+
+		lib, errors, code := check_library(
 			source,
-			name,
+			path,
 			defines         = state.config.defines,
 			types           = state.shared_types,
 			libraries       = {}, // TODO
@@ -115,6 +112,8 @@ check_file :: proc(state: ^State, source: string, uri: Uri, show_errors := true)
 		)
 
 		send_errors(state, lib_uri, errors, code)
+
+		libraries[path] = lib
 	}
 
 	ast.checker, errors = hep.check_with_types(

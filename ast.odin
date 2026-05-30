@@ -8,7 +8,6 @@ import "core:strings"
 import vmem "core:mem/virtual"
 
 import hep "hephaistos"
-// import ast "hephaistos/ast"
 
 Ast :: struct {
 	stmts:    []^hep.Ast_Stmt,

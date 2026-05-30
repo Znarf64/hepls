@@ -585,6 +585,10 @@ node_hover_text :: proc(node: ^hep.Ast_Node, allocator: runtime.Allocator, ctx: 
 		type   = v.type
 		value  = v.const_value
 
+		if entity != nil && entity.interface != nil {
+			fmt.sbprintfln(&b, "@(%v)", hep.interface_kind_names[entity.interface])
+		}
+
 		fmt.sbprint(&b, v.text)
 
 		if v.entity != nil && v.entity.kind == .Type {

@@ -4,6 +4,7 @@ import "base:runtime"
 
 import "core:fmt"
 import "core:slice"
+import "core:strings"
 
 import hep "hephaistos"
 
@@ -312,6 +313,12 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^in
 		}
 
 	case ^hep.Stmt_Return:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		arg_index: int
 		defer arg^ = arg_index
 		for value in v.values {
@@ -322,14 +329,32 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^in
 			arg_index += value_count(value.type)
 		}
 	case ^hep.Stmt_Break:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
 	case ^hep.Stmt_Continue:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
 	case ^hep.Stmt_For_Range:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
@@ -346,6 +371,12 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^in
 			return v.scope, n
 		}
 	case ^hep.Stmt_For:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
@@ -362,6 +393,12 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^in
 			return v.scope, n
 		}
 	case ^hep.Stmt_Block:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
@@ -369,6 +406,12 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^in
 			return v.scope, n
 		}
 	case ^hep.Stmt_If:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
@@ -385,6 +428,12 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^in
 			return v.else_scope, n
 		}
 	case ^hep.Stmt_Switch:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		if location_in_node(v.label, location) {
 			return nil, v.label
 		}
@@ -403,6 +452,12 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^in
 			}
 		}
 	case ^hep.Stmt_Assign:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		for l in v.lhs {
 			if location_in_node(l, location) {
 				return nil, l
@@ -415,8 +470,20 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^in
 			}
 		}
 	case ^hep.Stmt_Expr:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		return nil, v.expr
 	case ^hep.Stmt_When:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		if location_in_node(v.cond, location) {
 			return nil, v.cond
 		}
@@ -452,10 +519,22 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^in
 			}
 		}
 	case ^hep.Decl_Import:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		if location_in_node(v.alias, location) {
 			return nil, v.alias
 		}
 	case ^hep.Decl_Extension:
+		for a in v.attributes {
+			if f := hovered_field(a, location); f != nil {
+				return nil, f
+			}
+		}
+
 		if location_in_node(v.extension, location) {
 			return nil, v.extension
 		}
@@ -489,9 +568,10 @@ entity_detail_string :: proc(entity: ^hep.Entity, pretty: bool) -> string {
 node_hover_text :: proc(node: ^hep.Ast_Node, allocator: runtime.Allocator, ctx: Maybe(Hover_Context) = nil) -> string {
 	type:   ^hep.Type
 	value:   hep.Const_Value
-	prefix:  string
 	entity: ^hep.Entity
 	usage:   hep.Interface_Usage
+
+	b := strings.builder_make(allocator)
 
 	switch v in node.derived {
 	case ^hep.Expr_Constant:
@@ -501,13 +581,16 @@ node_hover_text :: proc(node: ^hep.Ast_Node, allocator: runtime.Allocator, ctx: 
 		type   = v.type
 		value  = v.const_value
 	case ^hep.Expr_Ident:
-		prefix = fmt.tprintf("%s: ", v.text)
 		entity = v.entity
 		type   = v.type
 		value  = v.const_value
 
+		fmt.sbprint(&b, v.text)
+
 		if v.entity != nil && v.entity.kind == .Type {
-			prefix = fmt.tprintf("%s :: ", v.text)
+			fmt.sbprint(&b, " :: ")
+		} else {
+			fmt.sbprint(&b, ": ")
 		}
 	case ^hep.Expr_Proc_Lit:
 		type   = v.type
@@ -544,8 +627,8 @@ node_hover_text :: proc(node: ^hep.Ast_Node, allocator: runtime.Allocator, ctx: 
 		if ctx, ok := ctx.?; ok {
 			shader_stage = ctx.shader_stage
 		}
+		fmt.sbprintf(&b, "$%s: ", v.ident.text)
 		usage  = hep.interface_infos[v.ident.text].usage[shader_stage]
-		prefix = fmt.tprintf("$%s: ", v.ident.text)
 		type   = v.type
 		value  = v.const_value
 	case ^hep.Expr_Directive:
@@ -561,16 +644,16 @@ node_hover_text :: proc(node: ^hep.Ast_Node, allocator: runtime.Allocator, ctx: 
 	case ^hep.Expr_Type_Struct:
 		if v.type.kind == .Named {
 			named := v.type.variant.(^hep.Type_Named)
-			prefix = fmt.tprint(named.name, ":: ")
 			type   = named.type
+			fmt.sbprint(&b, named.name, ":: ")
 		} else {
 			type = v.type
 		}
 	case ^hep.Expr_Type_Enum:
 		if v.type.kind == .Named {
 			named := v.type.variant.(^hep.Type_Named)
-			prefix = fmt.tprint(named.name, ":: ")
 			type   = named.type
+			fmt.sbprint(&b, named.name, ":: ")
 		} else {
 			type = v.type
 		}
@@ -606,37 +689,33 @@ node_hover_text :: proc(node: ^hep.Ast_Node, allocator: runtime.Allocator, ctx: 
 	case ^hep.Decl_Extension:
 	}
 
-	type_string: string
 	if entity != nil {
-		type_string = entity_detail_string(entity, true)
+		strings.write_string(&b, entity_detail_string(entity, true))
 	} else if type != nil {
-		type_string = hep.type_to_string(type, true, context.temp_allocator)
+		strings.write_string(&b, hep.type_to_string(type, true, context.temp_allocator))
 	} else {
+		strings.builder_destroy(&b)
 		return ""
 	}
 
-	suffix: string
+	if value == nil && entity != nil {
+		value = entity.value
+	}
+
 	if value != nil {
 		if str, ok := value.(string); ok {
-			type_string = "string"
-			suffix      = fmt.tprintf(` ("%s")`, str)
+			strings.write_string(&b, fmt.tprintf(`string ("%s")`, str))
 		} else {
-			suffix = fmt.tprintf(" (%v)", value)
+			strings.write_string(&b, fmt.tprintf(" (%v)", value))
 		}
 	} else if usage != nil {
 		switch usage {
 		case .In:
-			suffix = " (input)"
+			strings.write_string(&b, " (input)")
 		case .Out:
-			suffix = " (output)"
+			strings.write_string(&b, " (output)")
 		}
 	}
 
-	return fmt.aprint(
-		prefix,
-		type_string,
-		suffix,
-		sep       = "",
-		allocator = allocator,
-	)
+	return strings.to_string(b)
 }

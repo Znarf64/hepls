@@ -585,8 +585,47 @@ node_hover_text :: proc(node: ^hep.Ast_Node, allocator: runtime.Allocator, ctx: 
 		type   = v.type
 		value  = v.const_value
 
-		if entity != nil && entity.interface != nil {
-			fmt.sbprintfln(&b, "@(%v)", hep.interface_kind_names[entity.interface])
+		ab := strings.builder_make(context.temp_allocator)
+
+		find_decl: if entity != nil && entity.decl != nil {
+			decl := entity.decl.derived.(^hep.Decl_Value) or_break find_decl
+
+			if decl.interface != nil {
+				fmt.sbprintf(&ab, "@(%v", hep.interface_kind_names[decl.interface])
+			}
+
+			if decl.descriptor_set != -1 {
+				fmt.sbprint(&ab, ", descriptor_set =", decl.descriptor_set)
+			}
+
+			if decl.binding != -1 {
+				fmt.sbprint(&ab, ", binding =", decl.binding)
+			}
+
+			if decl.location != -1 {
+				fmt.sbprint(&ab, ", location =", decl.location)
+			}
+
+			if decl.shader_stage != nil {
+				fmt.sbprintf(&ab, "@(%v", hep.shader_stage_names[decl.shader_stage])
+			}
+
+			if strings.builder_len(ab) != 0 {
+				fmt.sbprintln(&ab, ")")
+				strings.write_string(&b, strings.to_string(ab))
+			}
+		}
+
+		if strings.builder_len(ab) == 0 {
+			if entity != nil && entity.location != -1 {
+				#partial switch entity.kind {
+				case .Proc_Param:
+					fmt.sbprintfln(&ab, "@(input, location = %d)", entity.location)
+				case .Proc_Return:
+					fmt.sbprintfln(&ab, "@(output, location = %d)", entity.location)
+				}
+				strings.write_string(&b, strings.to_string(ab))
+			}
 		}
 
 		fmt.sbprint(&b, v.text)

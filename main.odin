@@ -21,9 +21,9 @@ Error :: union {
 }
 
 State :: struct {
-	initialized:  bool,
-	shutdown:     bool,
-	exit:         bool,
+	initialized:   bool,
+	shutdown:      bool,
+	exit:          bool,
 
 	file_uris:     [dynamic]Uri,
 	asts:          map[Uri]Ast,

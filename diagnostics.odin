@@ -91,8 +91,8 @@ check_file :: proc(state: ^State, source: string, uri: Uri, show_errors := true)
 				code = "checker"
 			}
 
-			library.entities = c.scope.entities
-			library.stmts    = stmts
+			library.scope = c.scope
+			library.stmts = stmts
 			return
 		}
 

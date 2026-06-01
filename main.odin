@@ -638,80 +638,23 @@ request_completion :: proc(state: ^State, content: []byte) -> Error {
 		return
 	}
 
-	expected_entity_kind: hep.Entity_Kind
-	#partial switch v in ctx.expr {
-	// case ^hep_ast.Expr_Selector:
-	// 	if v.lhs == nil {
-	// 		break
-	// 	}
+	seen := make(map[string]struct{}, context.temp_allocator)
 
-	// 	if ident, ok := v.lhs.derived.(^hep_ast.Expr_Ident); ok {
-	// 		if ident.entity != nil && ident.entity.kind == .Library {
-	// 			lib := ast.checker.libraries[ident.entity.library] or_break
-	// 			for _, e in lib.entities {
-	// 				item := entity_completion_item(e) or_continue
-	// 				append(&items, item)
-	// 			}
-	// 			break
-	// 		}
-	// 	}
-
-	// 	type := v.lhs.type
-	// 	if type == nil {
-	// 		break
-	// 	}
-
-	// 	#partial switch type.kind {
-	// 	case .Array:
-	// 		append(&items, Completion_Item { label = "x", kind = .Field, })
-	// 		append(&items, Completion_Item { label = "y", kind = .Field, })
-	// 		append(&items, Completion_Item { label = "z", kind = .Field, })
-	// 		append(&items, Completion_Item { label = "w", kind = .Field, })
-
-	// 		append(&items, Completion_Item { label = "r", kind = .Field, })
-	// 		append(&items, Completion_Item { label = "g", kind = .Field, })
-	// 		append(&items, Completion_Item { label = "b", kind = .Field, })
-	// 		append(&items, Completion_Item { label = "a", kind = .Field, })
-	// 	case .Struct:
-	// 		for member in type.variant.(^hep_types.Struct).fields {
-	// 			append(&items, Completion_Item {
-	// 				label  = member.name,
-	// 				kind   = .Field,
-	// 				detail = hep_types.to_string(member.type, false, context.temp_allocator),
-	// 			})
-	// 		}
-	// 	case .Enum:
-	// 		for member in type.variant.(^hep_types.Enum).values {
-	// 			append(&items, Completion_Item {
-	// 				label  = member.name,
-	// 				kind   = .EnumMember,
-	// 				detail = fmt.tprint(member.value),
-	// 			})
-	// 		}
-	// 	}
-	case ^hep.Stmt_Break, ^hep.Stmt_Continue:
-		expected_entity_kind = .Label
-	case:
-		seen := make(map[string]struct{}, context.temp_allocator)
-
-		scope := ctx.scope
-		for scope != nil {
-			for name, e in scope.entities {
-				if name in seen {
-					continue
-				}
-				seen[name] = {}
-
-				if expected_entity_kind != nil && e.kind != expected_entity_kind {
-					continue
-				}
-
-				item := entity_completion_item(e) or_continue
-				append(&items, item)
+	scope := ctx.scope
+	for scope != nil {
+		for name, e in scope.entities {
+			if name in seen {
+				continue
 			}
-			scope = scope.parent
-		}
+			seen[name] = {}
 
+			item := entity_completion_item(e) or_continue
+			append(&items, item)
+		}
+		scope = scope.parent
+	}
+
+	if ctx.scope != nil && ctx.scope.parent != nil {
 		for name in hep.keyword_strings {
 			if name in seen {
 				continue

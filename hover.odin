@@ -71,10 +71,7 @@ get_hover_context :: proc(
 			ctx.expr = v
 		}
 
-		if scope, child := hovered_child_node(node, location, &ctx.arg_index); child != node {
-			if scope != nil {
-				ctx.scope = scope
-			}
+		if child := hovered_child_node(node, location, &ctx); child != node {
 			node = child
 		} else {
 			return
@@ -142,9 +139,9 @@ hovered_proc_sig :: proc(sig: ^hep.Expr_Proc_Sig, location: hep.Location) -> ^he
 }
 
 @(require_results)
-hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^int) -> (^hep.Scope, ^hep.Ast_Node) {
+hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, ctx: ^Hover_Context) -> ^hep.Ast_Node {
 	if !location_in_node(node, location) {
-		return nil, nil
+		return nil
 	}
 
 	@(require_results)
@@ -157,173 +154,190 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^in
 
 	switch v in node.derived {
 	case ^hep.Expr_Constant, ^hep.Expr_Ident, ^hep.Expr_Interface, ^hep.Expr_Directive:
-		return nil, node
+		return node
 	case ^hep.Expr_Binary:
 		if location_in_node(v.lhs, location) {
-			return nil, v.lhs
+			return v.lhs
 		}
 		if location_in_node(v.rhs, location) {
-			return nil, v.rhs
+			return v.rhs
 		}
 	case ^hep.Expr_Proc_Lit:
 		if h := hovered_proc_sig(v, location); h != nil {
-			return nil, h
+			return h
 		}
 		if n := _hovered_node_in_block(v.body, location); n != nil {
-			return v.scope, n
+			ctx.scope = v.scope
+			return n
 		}
 	case ^hep.Expr_Proc_Sig:
 		if h := hovered_proc_sig(v, location); h != nil {
-			return nil, h
+			return h
 		}
 	case ^hep.Expr_Proc_Group:
 		for m in v.members {
 			if location_in_node(m, location) {
-				return nil, m
+				return m
 			}
 		}
 	case ^hep.Expr_Paren:
 		if location_in_node(v.expr, location) {
-			return nil, v.expr
+			return v.expr
 		}
 	case ^hep.Expr_Selector:
 		if location_in_node(v.lhs, location) {
-			return nil, v.lhs
+			return v.lhs
 		}
 		if location_in_node(v.selector, location) {
-			return nil, v.selector
+			if ident, ok := v.lhs.derived.(^hep.Expr_Ident); ok {
+				if ident.entity != nil && ident.entity.kind == .Library {
+					ctx.scope = ident.entity.library.scope
+				}
+			}
+
+			if v.lhs.type != nil {
+				type := hep.base_type(v.lhs.type)
+				#partial switch v in type.variant {
+				case ^hep.Type_Struct:
+					ctx.scope = v.scope
+				case ^hep.Type_Enum:
+					ctx.scope = v.scope
+				}
+			}
+
+			return v.selector
 		}
 	case ^hep.Expr_Call:
 		if location_in_node(v.lhs, location) {
-			return nil, v.lhs
+			return v.lhs
 		}
 
 		arg_index: int
-		defer arg^ = arg_index
+		defer ctx.arg_index = arg_index
 		for value in v.args {
 			if f := hovered_field(value, location); f != nil {
-				return nil, f
+				return f
 			}
 
 			arg_index += value_count(value.value.type)
 		}
 	case ^hep.Expr_Compound:
 		if location_in_node(v.type_expr, location) {
-			return nil, v.type_expr
+			return v.type_expr
 		}
 
 		arg_index: int
-		defer arg^ = arg_index
+		defer ctx.arg_index = arg_index
 		for value in v.fields {
 			if f := hovered_field(value, location); f != nil {
 				if value.name != nil {
 					arg_index = value.member_index
 				}
-				return nil, f
+				return f
 			}
 
 			arg_index += value_count(value.value.type)
 		}
 	case ^hep.Expr_Index:
 		if location_in_node(v.lhs, location) {
-			return nil, v.lhs
+			return v.lhs
 		}
 		if location_in_node(v.rhs, location) {
-			return nil, v.rhs
+			return v.rhs
 		}
 	case ^hep.Expr_Cast:
 		if location_in_node(v.value, location) {
-			return nil, v.value
+			return v.value
 		}
 		if location_in_node(v.type_expr, location) {
-			return nil, v.type_expr
+			return v.type_expr
 		}
 	case ^hep.Expr_Unary:
 		if location_in_node(v.expr, location) {
-			return nil, v.expr
+			return v.expr
 		}
 	case ^hep.Expr_Ternary:
 		if location_in_node(v.cond, location) {
-			return nil, v.cond
+			return v.cond
 		}
 		if location_in_node(v.then_expr, location) {
-			return nil, v.then_expr
+			return v.then_expr
 		}
 		if location_in_node(v.else_expr, location) {
-			return nil, v.else_expr
+			return v.else_expr
 		}
 	case ^hep.Expr_Ellipsis:
 		if location_in_node(v.expr, location) {
-			return nil, v.expr
+			return v.expr
 		}
 
 	case ^hep.Expr_Type_Struct:
 		for field in v.fields {
 			if f := hovered_field(field, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 	case ^hep.Expr_Type_Array:
 		if location_in_node(v.count, location) {
-			return nil, v.count
+			return v.count
 		}
 		if location_in_node(v.elem, location) {
-			return nil, v.elem
+			return v.elem
 		}
 	case ^hep.Expr_Type_Matrix:
 		if location_in_node(v.rows, location) {
-			return nil, v.rows
+			return v.rows
 		}
 		if location_in_node(v.cols, location) {
-			return nil, v.cols
+			return v.cols
 		}
 		if location_in_node(v.elem, location) {
-			return nil, v.elem
+			return v.elem
 		}
 	case ^hep.Expr_Type_Image:
 		if location_in_node(v.dimensions, location) {
-			return nil, v.dimensions
+			return v.dimensions
 		}
 		if location_in_node(v.texel_type, location) {
-			return nil, v.texel_type
+			return v.texel_type
 		}
 	case ^hep.Expr_Type_Enum:
 		for value in v.values {
 			if f := hovered_field(value, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 	case ^hep.Expr_Type_Bit_Set:
 		if location_in_node(v.enum_type, location) {
-			return nil, v.enum_type
+			return v.enum_type
 		}
 		if location_in_node(v.backing, location) {
-			return nil, v.backing
+			return v.backing
 		}
 	case ^hep.Expr_Type_Opaque:
 		if location_in_node(v.name, location) {
-			return nil, v.name
+			return v.name
 		}
 		if location_in_node(v.backing, location) {
-			return nil, v.backing
+			return v.backing
 		}
 	case ^hep.Expr_Type_Distinct:
 		if location_in_node(v.backing, location) {
-			return nil, v.backing
+			return v.backing
 		}
 
 	case ^hep.Stmt_Return:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		arg_index: int
-		defer arg^ = arg_index
+		defer ctx.arg_index = arg_index
 		for value in v.values {
 			if location_in_node(value, location) {
-				return nil, value
+				return value
 			}
 
 			arg_index += value_count(value.type)
@@ -331,220 +345,237 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, arg: ^in
 	case ^hep.Stmt_Break:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		if location_in_node(v.label, location) {
-			return nil, v.label
+			return v.label
 		}
 	case ^hep.Stmt_Continue:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		if location_in_node(v.label, location) {
-			return nil, v.label
+			return v.label
 		}
 	case ^hep.Stmt_For_Range:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		if location_in_node(v.label, location) {
-			return nil, v.label
+			return v.label
 		}
 		if location_in_node(v.start_expr, location) {
-			return v.init_scope, v.start_expr
+			ctx.scope = v.init_scope
+			return v.start_expr
 		}
 		if location_in_node(v.end_expr, location) {
-			return v.init_scope, v.end_expr
+			ctx.scope = v.init_scope
+			return v.end_expr
 		}
 		if location_in_node(v.variable, location) {
-			return v.init_scope, v.variable
+			ctx.scope = v.init_scope
+			return v.variable
 		}
 		if n := _hovered_node_in_block(v.body, location); n != nil {
-			return v.scope, n
+			ctx.scope = v.scope
+			return n
 		}
 	case ^hep.Stmt_For:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		if location_in_node(v.label, location) {
-			return nil, v.label
+			return v.label
 		}
 		if location_in_node(v.init, location) {
-			return v.init_scope, v.init
+			ctx.scope = v.init_scope
+			return v.init
 		}
 		if location_in_node(v.cond, location) {
-			return v.init_scope, v.cond
+			ctx.scope = v.init_scope
+			return v.cond
 		}
 		if location_in_node(v.post, location) {
-			return v.init_scope, v.post
+			ctx.scope = v.init_scope
+			return v.post
 		}
 		if n := _hovered_node_in_block(v.body, location); n != nil {
-			return v.scope, n
+			ctx.scope = v.scope
+			return n
 		}
 	case ^hep.Stmt_Block:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		if location_in_node(v.label, location) {
-			return nil, v.label
+			return v.label
 		}
 		if n := _hovered_node_in_block(v.body, location); n != nil {
-			return v.scope, n
+			ctx.scope = v.scope
+			return n
 		}
 	case ^hep.Stmt_If:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		if location_in_node(v.label, location) {
-			return nil, v.label
+			return v.label
 		}
 		if location_in_node(v.init, location) {
-			return v.init_scope, v.init
+			ctx.scope = v.init_scope
+			return v.init
 		}
 		if location_in_node(v.cond, location) {
-			return v.init_scope, v.cond
+			ctx.scope = v.init_scope
+			return v.cond
 		}
 		if n := _hovered_node_in_block(v.then_block, location); n != nil {
-			return v.then_scope, n
+			ctx.scope = v.then_scope
+			return n
 		}
 		if n := _hovered_node_in_block(v.else_block, location); n != nil {
-			return v.else_scope, n
+			ctx.scope = v.else_scope
+			return n
 		}
 	case ^hep.Stmt_Switch:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		if location_in_node(v.label, location) {
-			return nil, v.label
+			return v.label
 		}
 		if location_in_node(v.init, location) {
-			return v.scope, v.init
+			ctx.scope = v.scope
+			return v.init
 		}
 		if location_in_node(v.cond, location) {
-			return v.scope, v.cond
+			ctx.scope = v.scope
+			return v.cond
 		}
 		for c in v.cases {
 			if location_in_node(c.value, location) {
-				return c.scope, c.value
+				ctx.scope = c.scope
+				return c.value
 			}
 			if n := _hovered_node_in_block(c.body, location); n != nil {
-				return c.scope, n
+				ctx.scope = c.scope
+				return n
 			}
 		}
 	case ^hep.Stmt_Assign:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		for l in v.lhs {
 			if location_in_node(l, location) {
-				return nil, l
+				return l
 			}
 		}
 
 		for r in v.rhs {
 			if location_in_node(r, location) {
-				return nil, r
+				return r
 			}
 		}
 	case ^hep.Stmt_Expr:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
-		return nil, v.expr
+		return v.expr
 	case ^hep.Stmt_When:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		if location_in_node(v.cond, location) {
-			return nil, v.cond
+			return v.cond
 		}
 		n := _hovered_node_in_block(v.then_block, location)
 		if n != nil {
-			return nil, n
+			return n
 		}
 		n = _hovered_node_in_block(v.else_block, location)
 		if n != nil {
-			return nil, n
+			return n
 		}
 
 	case ^hep.Decl_Value:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		if location_in_node(v.type_expr, location) {
-			return nil, v.type_expr
+			return v.type_expr
 		}
 
 		for l in v.lhs {
 			if location_in_node(l, location) {
-				return nil, l
+				return l
 			}
 		}
 
 		for v in v.values {
 			if location_in_node(v, location) {
-				return nil, v
+				return v
 			}
 		}
 	case ^hep.Decl_Import:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		if location_in_node(v.alias, location) {
-			return nil, v.alias
+			return v.alias
 		}
 	case ^hep.Decl_Extension:
 		for a in v.attributes {
 			if f := hovered_field(a, location); f != nil {
-				return nil, f
+				return f
 			}
 		}
 
 		if location_in_node(v.extension, location) {
-			return nil, v.extension
+			return v.extension
 		}
 		n := _hovered_node_in_block(v.body, location)
 		if n != nil {
-			return nil, n
+			return n
 		}
 	}
 
-	return nil, node
+	return node
 }
 
 // may allocate using context.temp_allocator

@@ -19,17 +19,19 @@ Ast :: struct {
 }
 
 @(require_results)
-get_node_entity :: proc(node: ^hep.Ast_Node) -> (entity: ^hep.Entity) {
+get_node_entity :: proc(node: ^hep.Ast_Node) -> ^hep.Entity {
 	if node == nil {
-		return
+		return nil
 	}
 
-	ident, ok := node.derived.(^hep.Expr_Ident)
-	if !ok {
-		return
+	#partial switch v in node.derived {
+	case ^hep.Expr_Ident:
+		return v.entity
+	case ^hep.Decl_Import:
+		return v.entity
 	}
 
-	return ident.entity
+	return nil
 }
 
 @(require_results)

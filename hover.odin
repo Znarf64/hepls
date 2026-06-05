@@ -34,13 +34,15 @@ Hover_Context :: struct {
 	scope:       ^hep.Scope,
 	shader_stage: hep.Shader_Stage,
 	arg_index:    int, // Index of relevant field for compound, call and return
-	expr:         union {
+	node:         union {
 		^hep.Expr_Call,
 		^hep.Expr_Compound,
 
 		^hep.Stmt_Return,
 		^hep.Stmt_Break,
 		^hep.Stmt_Continue,
+
+		^hep.Decl_Import,
 	},
 }
 
@@ -60,15 +62,17 @@ get_hover_context :: proc(
 		case ^hep.Expr_Proc_Lit:
 			ctx.procedure = v
 		case ^hep.Expr_Compound:
-			ctx.expr = v
+			ctx.node = v
 		case ^hep.Stmt_Return:
-			ctx.expr = v
+			ctx.node = v
 		case ^hep.Stmt_Break:
-			ctx.expr = v
+			ctx.node = v
 		case ^hep.Stmt_Continue:
-			ctx.expr = v
+			ctx.node = v
 		case ^hep.Expr_Call:
-			ctx.expr = v
+			ctx.node = v
+		case ^hep.Decl_Import:
+			ctx.node = v
 		}
 
 		if child := hovered_child_node(node, location, &ctx); child != node {
@@ -602,6 +606,12 @@ node_hover_text :: proc(node: ^hep.Ast_Node, allocator: runtime.Allocator, ctx: 
 	entity: ^hep.Entity
 	usage:   hep.Interface_Usage
 
+	if ctx, ok := ctx.?; ok {
+		if import_, ok := ctx.node.(^hep.Decl_Import); ok {
+			return fmt.aprintf(`%s: library ("%v")`, import_.entity.name, import_.path.value.(string) or_else "", allocator = allocator)
+		}
+	}
+
 	b := strings.builder_make(allocator)
 
 	switch v in node.derived {
@@ -763,22 +773,26 @@ node_hover_text :: proc(node: ^hep.Ast_Node, allocator: runtime.Allocator, ctx: 
 	case ^hep.Decl_Extension:
 	}
 
+	if value == nil && entity != nil {
+		value = entity.value
+	}
+
 	if entity != nil {
 		strings.write_string(&b, entity_detail_string(entity, true))
 	} else if type != nil {
-		strings.write_string(&b, hep.type_to_string(type, true, context.temp_allocator))
+		if str, ok := value.(string); ok && type.kind == .Invalid {
+			strings.write_string(&b, fmt.tprintf(`string`))
+		} else {
+			strings.write_string(&b, hep.type_to_string(type, true, context.temp_allocator))
+		}
 	} else {
 		strings.builder_destroy(&b)
 		return ""
 	}
 
-	if value == nil && entity != nil {
-		value = entity.value
-	}
-
 	if value != nil {
 		if str, ok := value.(string); ok {
-			strings.write_string(&b, fmt.tprintf(`string ("%s")`, str))
+			strings.write_string(&b, fmt.tprintf(` ("%s")`, str))
 		} else {
 			strings.write_string(&b, fmt.tprintf(" (%v)", value))
 		}

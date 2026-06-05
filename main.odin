@@ -986,6 +986,24 @@ request_rename :: proc(state: ^State, content: []byte) -> Error {
 		})
 	}
 
+	if import_, ok := entity.decl.derived.(^hep.Decl_Import); entity.ident == nil && ok {
+		uri := state.file_uris[import_.start.file_id]
+		if uri not_in changes {
+			changes[uri] = make([dynamic]Text_Edit, context.temp_allocator)
+		}
+		edits := &changes[uri]
+
+		position := location_to_position(import_.path.start)
+
+		append(edits, Text_Edit {
+			range = {
+				start = position,
+				end   = position,
+			},
+			newText = strings.concatenate({ params.newName, " ", }, context.temp_allocator),
+		})
+	}
+
 	response.result = Workspace_Edit {
 		changes = changes,
 	}
@@ -1032,7 +1050,7 @@ request_signature_help :: proc(state: ^State, content: []byte) -> Error {
 	signature: Signature_Information
 	args:      []^hep.Entity
 
-	#partial switch v in ctx.expr {
+	#partial switch v in ctx.node {
 	case ^hep.Expr_Compound:
 		if v.type == nil {
 			break

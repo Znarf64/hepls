@@ -181,6 +181,7 @@ get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.
 			case ^hep.Type_Named:
 				v.name = strings.clone(v.name, allocator)
 				clone_type_strings(v.type,     allocator)
+			case ^hep.Type_Fixed:
 			}
 		}
 

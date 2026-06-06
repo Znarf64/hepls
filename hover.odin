@@ -329,6 +329,8 @@ hovered_child_node :: proc(node: ^hep.Ast_Node, location: hep.Location, ctx: ^Ho
 		if location_in_node(v.backing, location) {
 			return v.backing
 		}
+	case ^hep.Expr_Type_Fixed:
+		return nil
 
 	case ^hep.Stmt_Return:
 		for a in v.attributes {
@@ -752,6 +754,8 @@ node_hover_text :: proc(node: ^hep.Ast_Node, allocator: runtime.Allocator, ctx: 
 	case ^hep.Expr_Type_Opaque:
 		type = v.type
 	case ^hep.Expr_Type_Distinct:
+		type = v.type
+	case ^hep.Expr_Type_Fixed:
 		type = v.type
 
 	case ^hep.Stmt_Return:

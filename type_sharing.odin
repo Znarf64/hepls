@@ -139,8 +139,10 @@ get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.
 		clone_type_strings :: proc(type: ^hep.Type, allocator: runtime.Allocator) {
 			switch v in type.variant {
 			case ^hep.Type_Struct:
+				clear(&v.scope.entities)
 				for &field in v.fields {
 					field.name = strings.clone(field.name, allocator)
+					v.scope.entities[field.name] = field
 					clone_type_strings(field.type, allocator)
 				}
 			case ^hep.Type_Matrix:
@@ -166,8 +168,10 @@ get_package_types :: proc(config: Config, path: string, types: ^map[string]^hep.
 			case ^hep.Type_Image:
 				clone_type_strings(v.texel_type, allocator)
 			case ^hep.Type_Enum:
+				clear(&v.scope.entities)
 				for &value in v.values {
-					value.name = strings.clone(value.name, allocator)
+					value.name                   = strings.clone(value.name, allocator)
+					v.scope.entities[value.name] = value
 				}
 				clone_type_strings(v.backing, allocator)
 			case ^hep.Type_Bit_Set:
